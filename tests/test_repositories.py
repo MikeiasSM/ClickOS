@@ -70,6 +70,17 @@ def test_bloqueia_excluir_cliente_vinculado(tmp_path):
         repo.clientes.delete(con, c["id"])
 
 
+def test_status_padrao_por_tipo_e_prioridade(tmp_path):
+    con = db.connect(tmp_path / "t.db")
+    orc = repo.documentos.create(con, {"tipo": "orcamento", "data_abertura": "2026-06-13", "itens": []})
+    os_doc = repo.documentos.create(con, {"tipo": "os", "data_abertura": "2026-06-13",
+                                          "prioridade": "Urgente", "itens": []})
+    assert orc["status"] == "Aberto"          # orçamento
+    assert os_doc["status"] == "Aberta"       # ordem de serviço
+    assert orc["prioridade"] == "Normal"      # default
+    assert os_doc["prioridade"] == "Urgente"  # informado
+
+
 def test_converter_orcamento_em_os(tmp_path):
     con = db.connect(tmp_path / "t.db")
     c = _cliente(con)

@@ -162,7 +162,7 @@ class _Itens:
 
 # --------------------------------------------------------------------------- documentos
 class _Documentos:
-    HEAD = ["tipo", "status", "data_abertura", "cliente_id", "veiculo_id", "km_entrada",
+    HEAD = ["tipo", "status", "prioridade", "data_abertura", "cliente_id", "veiculo_id", "km_entrada",
             "desconto_geral", "acrescimo", "forma_pagamento", "prazo_execucao", "validade",
             "observacoes", "estado_geral", "nivel_combustivel", "obs_entrada",
             "item_chave_principal", "item_chave_reserva", "item_documento", "item_manual",
@@ -172,7 +172,8 @@ class _Documentos:
         now = _now(stamp)
         data = {**data}
         data.setdefault("tipo", "orcamento")
-        data.setdefault("status", "Aberta")
+        data.setdefault("status", "Aberta" if data["tipo"] == "os" else "Aberto")
+        data.setdefault("prioridade", "Normal")
         data.setdefault("desconto_geral", 0)
         data.setdefault("acrescimo", 0)
         numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))

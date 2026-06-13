@@ -4,7 +4,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -15,6 +15,13 @@ LISTA_PECAS = [
 
 NIVEIS_COMBUSTIVEL = ["Reserva", "1/4", "1/2", "3/4", "Cheio"]
 
+# Status simplificados e diferentes por tipo
+STATUS_ORCAMENTO = ["Aberto", "Aprovado", "Recusado", "Cancelado"]
+STATUS_OS = ["Aberta", "Em Execução", "Concluída", "Entregue", "Cancelada"]
+# Colunas do quadro (pipeline): Orçamentos + os 3 status principais da OS
+KANBAN_OS_STATUS = ["Aberta", "Em Execução", "Concluída"]
+PRIORIDADES = ["Normal", "Alta", "Urgente"]
+
 # Sugestões iniciais (autocomplete que cresce com o que o usuário cadastra)
 SUG_MARCAS = ["Chevrolet", "Volkswagen", "Fiat", "Ford", "Toyota", "Honda", "Hyundai", "Renault",
               "Nissan", "Jeep", "Peugeot", "Citroën", "Mitsubishi", "Kia", "BMW", "Mercedes-Benz",
@@ -24,7 +31,7 @@ SUG_CORES = ["Branco", "Preto", "Prata", "Cinza", "Vermelho", "Azul", "Verde", "
 SUG_COMBUSTIVEIS = ["Gasolina", "Etanol", "Flex", "Diesel", "GNV", "Híbrido", "Elétrico"]
 SUG_CIDADES = ["Luís Eduardo Magalhães", "Barreiras", "São Desidério", "Riachão das Neves",
                "Catolândia", "Baianópolis", "Angical", "Salvador"]
-STATUS_LISTA = ["Aberta", "Em Análise", "Aprovado", "Em Execução", "Concluído", "Entregue", "Cancelado"]
+STATUS_LISTA = STATUS_ORCAMENTO + STATUS_OS  # união (para filtros)
 ESTADO_GERAL_LISTA = ["Sem avarias aparentes", "Com avarias registradas"]
 FORMAS_PAGAMENTO = ["Dinheiro", "PIX", "Cartão de Débito", "Cartão de Crédito",
                     "Transferência/TED", "Boleto", "Cheque", "Parcelado"]
@@ -69,6 +76,7 @@ CREATE TABLE IF NOT EXISTS itens_catalogo (
 CREATE TABLE IF NOT EXISTS documentos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   numero TEXT NOT NULL UNIQUE, tipo TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Aberta',
+  prioridade TEXT DEFAULT 'Normal',
   data_abertura TEXT, criado_em TEXT, atualizado_em TEXT,
   cliente_id INTEGER REFERENCES clientes(id), veiculo_id INTEGER REFERENCES veiculos(id),
   km_entrada TEXT,
@@ -116,10 +124,24 @@ def connect(path=None) -> sqlite3.Connection:
     return con
 
 
+def _add_column(con, table, col, decl):
+    existentes = [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
+    if col not in existentes:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def _migrate(con: sqlite3.Connection) -> None:
-    con.executescript(DDL)
-    if con.execute("SELECT schema_version FROM meta LIMIT 1").fetchone() is None:
+    con.executescript(DDL)  # cria tabelas ausentes (banco novo já vem com prioridade)
+    row = con.execute("SELECT schema_version FROM meta LIMIT 1").fetchone()
+    if row is None:
         con.execute("INSERT INTO meta(schema_version) VALUES (?)", (SCHEMA_VERSION,))
+        ver = SCHEMA_VERSION
+    else:
+        ver = row[0]
+    # migrações incrementais para bancos existentes
+    if ver < 2:
+        _add_column(con, "documentos", "prioridade", "TEXT DEFAULT 'Normal'")
+        con.execute("UPDATE meta SET schema_version = 2")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     con.commit()

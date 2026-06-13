@@ -52,6 +52,10 @@ class Api:
         return {
             "empresa": self._empresa_sem_logo(),
             "status_lista": dbmod.STATUS_LISTA,
+            "status_orcamento": dbmod.STATUS_ORCAMENTO,
+            "status_os": dbmod.STATUS_OS,
+            "kanban_os_status": dbmod.KANBAN_OS_STATUS,
+            "prioridades": dbmod.PRIORIDADES,
             "formas_pagamento": dbmod.FORMAS_PAGAMENTO,
             "niveis_combustivel": dbmod.NIVEIS_COMBUSTIVEL,
             "estado_geral": dbmod.ESTADO_GERAL_LISTA,
@@ -176,6 +180,15 @@ class Api:
     @_api
     def get_empresa(self):
         return self._empresa_sem_logo()
+
+    @_api
+    def get_logo_uri(self):
+        import base64
+        row = self.con.execute("SELECT logo FROM empresa WHERE id=1").fetchone()
+        logo = row[0] if row else None
+        if not logo:
+            return {"uri": ""}
+        return {"uri": "data:image/png;base64," + base64.b64encode(logo).decode("ascii")}
 
     @_api
     def save_empresa(self, payload):
