@@ -21,6 +21,8 @@ STATUS_OS = ["Aberta", "Em Execução", "Concluída", "Entregue", "Cancelada"]
 # Colunas do quadro (pipeline): Orçamentos + os 3 status principais da OS
 KANBAN_OS_STATUS = ["Aberta", "Em Execução", "Concluída"]
 PRIORIDADES = ["Normal", "Alta", "Urgente"]
+UFS = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB",
+       "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"]
 
 # Sugestões iniciais (autocomplete que cresce com o que o usuário cadastra)
 SUG_MARCAS = ["Chevrolet", "Volkswagen", "Fiat", "Ford", "Toyota", "Honda", "Hyundai", "Renault",
@@ -100,6 +102,10 @@ CREATE TABLE IF NOT EXISTS documento_lataria (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   documento_id INTEGER NOT NULL REFERENCES documentos(id) ON DELETE CASCADE,
   peca TEXT NOT NULL, estado TEXT DEFAULT '', ordem INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS cidades_custom (
+  nome TEXT NOT NULL, uf TEXT NOT NULL, UNIQUE(nome, uf)
 );
 """
 

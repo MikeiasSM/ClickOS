@@ -17,6 +17,9 @@ def _stamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+_CIDADES = None  # cache da base IBGE [[cidade, uf], ...]
+
+
 def _api(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -48,6 +51,32 @@ class Api:
         return repo.sugestoes(self.con)
 
     @_api
+    def cidades(self):
+        """Base IBGE (todas as cidades do Brasil + UF) somada às cidades cadastradas pelo usuário."""
+        global _CIDADES
+        if _CIDADES is None:
+            import json
+            try:
+                _CIDADES = json.loads(Path(paths.asset("assets", "cidades.json")).read_text(encoding="utf-8"))
+            except Exception:
+                _CIDADES = []
+        custom = [[r[0], r[1]] for r in self.con.execute("SELECT nome, uf FROM cidades_custom ORDER BY nome")]
+        return _CIDADES + custom
+
+    @_api
+    def add_cidade(self, payload):
+        """Cadastra uma cidade nova; UF deve ser uma das existentes (nunca um novo estado)."""
+        nome = (payload.get("nome") or "").strip()
+        uf = (payload.get("uf") or "").strip().upper()
+        if not nome:
+            raise ValueError("Informe o nome da cidade.")
+        if uf not in dbmod.UFS:
+            raise ValueError("UF inválida.")
+        self.con.execute("INSERT OR IGNORE INTO cidades_custom(nome, uf) VALUES (?, ?)", (nome, uf))
+        self.con.commit()
+        return {"nome": nome, "uf": uf}
+
+    @_api
     def bootstrap(self):
         return {
             "empresa": self._empresa_sem_logo(),
@@ -56,6 +85,7 @@ class Api:
             "status_os": dbmod.STATUS_OS,
             "kanban_os_status": dbmod.KANBAN_OS_STATUS,
             "prioridades": dbmod.PRIORIDADES,
+            "ufs": dbmod.UFS,
             "formas_pagamento": dbmod.FORMAS_PAGAMENTO,
             "niveis_combustivel": dbmod.NIVEIS_COMBUSTIVEL,
             "estado_geral": dbmod.ESTADO_GERAL_LISTA,

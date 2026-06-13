@@ -5,6 +5,7 @@ const main = () => document.getElementById("main");
 let B = { status_orcamento: [], status_os: [], kanban_os_status: [], prioridades: ["Normal"],
   formas_pagamento: [], niveis_combustivel: [], estado_geral: [], pecas: [] };
 let SUG = { marcas: [], cores: [], combustiveis: [], cidades: [] };
+let CITIES = [];  // base IBGE [[cidade, uf], ...] carregada uma vez
 
 /* ----------------------------------------------------------------- ícones (Feather/Lucide, MIT) */
 const ICONS = {
@@ -89,7 +90,20 @@ function openModal(node) {
   bg.addEventListener("mousedown", e => { if (e.target === bg) bg.remove(); });
   document.getElementById("modal-root").appendChild(bg); injectIcons(node); return bg;
 }
-async function confirma(msg) { return window.confirm(msg); }
+function confirma(msg, opts) {
+  opts = opts || {};
+  return new Promise(res => {
+    const m = h(`<div class="modal" style="width:420px"><h3>${esc(opts.title || "Confirmar")}</h3>
+      <p class="muted" style="margin:0 0 18px">${esc(msg)}</p>
+      <div class="between"><button class="btn" id="n">Cancelar</button>
+        <button class="btn ${opts.danger ? "btn-danger" : "btn-primary"}" id="y">${esc(opts.ok || "Confirmar")}</button></div></div>`);
+    const bg = h(`<div class="modal-bg"></div>`); bg.appendChild(m);
+    bg.addEventListener("mousedown", e => { if (e.target === bg) { bg.remove(); res(false); } });
+    document.getElementById("modal-root").appendChild(bg);
+    m.querySelector("#n").onclick = () => { bg.remove(); res(false); };
+    m.querySelector("#y").onclick = () => { bg.remove(); res(true); };
+  });
+}
 function render(html) { main().innerHTML = html; injectIcons(main()); }
 
 /* ----------------------------------------------------------------- componentes v3 */
@@ -106,15 +120,32 @@ function viewToggle(screen, current, options, onChange) {
   return t;
 }
 
-/* combobox para SELECIONAR de uma lista (retorna id) com busca e cadastro inline */
+/* posiciona o popover para cima quando há pouco espaço abaixo (evita corte em modais) */
+function placePop(input, pop) {
+  const r = input.getBoundingClientRect();
+  pop.classList.toggle("up", (window.innerHeight - r.bottom) < 260 && r.top > 280);
+}
+/* navegação por teclado (setas/enter/esc) compartilhada pelos comboboxes */
+function keyHandler(input, pop, open, close, getAi, setAi) {
+  return e => {
+    const opts = [...pop.querySelectorAll(".combo-opt, .combo-add")];
+    const hl = () => { opts.forEach((o, i) => o.classList.toggle("active", i === getAi())); const a = opts[getAi()]; if (a) a.scrollIntoView({ block: "nearest" }); };
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!pop.classList.contains("open")) { open(); return; } setAi(Math.min(getAi() + 1, opts.length - 1)); hl(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setAi(Math.max(getAi() - 1, 0)); hl(); }
+    else if (e.key === "Enter") { const o = opts[getAi()]; if (pop.classList.contains("open") && o) { e.preventDefault(); o.click(); } }
+    else if (e.key === "Escape") { close(); }
+  };
+}
+
+/* combobox para SELECIONAR de uma lista (retorna id) com busca, teclado e cadastro inline */
 function comboSelect(items, value, opt) {
-  let sel = value || null;
+  let sel = value || null, ai = -1;
   const getLabel = opt.getLabel || (x => x.nome);
   const wrap = h(`<div class="combo"><div class="combo-input"><input placeholder="${esc(opt.placeholder || "Selecione...")}">${ic("search", 14)}</div><div class="combo-pop"></div></div>`);
   const input = wrap.querySelector("input"), pop = wrap.querySelector(".combo-pop");
-  const labelOf = () => { const it = items.find(x => x.id == sel); return it ? getLabel(it) : ""; };
-  const setText = () => { input.value = labelOf(); };
+  const setText = () => { const it = items.find(x => x.id == sel); input.value = it ? getLabel(it) : ""; };
   function renderOpts(filter) {
+    ai = -1;
     const f = (filter || "").toLowerCase();
     const matches = items.filter(x => getLabel(x).toLowerCase().includes(f)).slice(0, 80);
     let html = matches.map(x => `<div class="combo-opt" data-id="${x.id}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}</div>`).join("");
@@ -124,42 +155,61 @@ function comboSelect(items, value, opt) {
     pop.querySelectorAll(".combo-opt[data-id]").forEach(o => o.onclick = () => { sel = o.dataset.id; close(); opt.onSelect && opt.onSelect(sel); });
     const add = pop.querySelector(".combo-add"); if (add) add.onclick = () => { const t = input.value.trim(); pop.classList.remove("open"); opt.onCreate(t); };
   }
-  function open() { input.value = ""; renderOpts(""); pop.classList.add("open"); input.focus(); }
+  function open() { input.value = ""; renderOpts(""); pop.classList.add("open"); placePop(input, pop); input.focus(); }
   function close() { pop.classList.remove("open"); setText(); }
   wrap.querySelector(".combo-input").onclick = () => { if (!pop.classList.contains("open")) open(); };
-  input.oninput = () => { pop.classList.add("open"); renderOpts(input.value); };
-  wrap.__close = close;
+  input.oninput = () => { pop.classList.add("open"); renderOpts(input.value); placePop(input, pop); };
+  input.onkeydown = keyHandler(input, pop, open, close, () => ai, v => ai = v);
   document.addEventListener("mousedown", e => { if (!wrap.contains(e.target)) close(); });
   setText();
-  wrap._value = () => sel;
-  wrap._setItems = it => { items = it; setText(); };
-  wrap._setValue = v => { sel = v; setText(); };
+  wrap._value = () => sel; wrap._setItems = it => { items = it; setText(); }; wrap._setValue = v => { sel = v; setText(); };
   return wrap;
 }
 
-/* combobox de TEXTO LIVRE com sugestões (retorna o texto). Sugestões podem ser strings ou objetos. */
+/* combobox de TEXTO LIVRE com sugestões (retorna o texto) + teclado + cadastro opcional (onCreate) */
 function comboText(items, value, opt) {
+  let ai = -1;
   const getLabel = opt.getLabel || (x => x);
   const wrap = h(`<div class="combo"><div class="combo-input"><input placeholder="${esc(opt.placeholder || "")}">${ic("search", 14)}</div><div class="combo-pop"></div></div>`);
   const input = wrap.querySelector("input"), pop = wrap.querySelector(".combo-pop");
   input.value = value || "";
+  const exact = () => items.some(x => getLabel(x).toLowerCase() === input.value.trim().toLowerCase());
   function renderOpts() {
+    ai = -1;
     const f = input.value.trim().toLowerCase();
     const matches = items.filter(x => getLabel(x).toLowerCase().includes(f)).slice(0, 60);
-    pop.innerHTML = matches.length
-      ? matches.map((x, i) => `<div class="combo-opt" data-i="${i}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}</div>`).join("")
-      : '<div class="combo-none">Sem sugestões — será usado como texto</div>';
+    let html = matches.map((x, i) => `<div class="combo-opt" data-i="${i}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}</div>`).join("");
+    if (!matches.length && !opt.onCreate) html = '<div class="combo-none">Sem sugestões — usado como texto</div>';
+    if (opt.onCreate && input.value.trim() && !exact()) html += `<div class="combo-add">${ic("plus", 15)}<span>${esc(opt.createLabel ? opt.createLabel(input.value.trim()) : 'Cadastrar "' + input.value.trim() + '"')}</span></div>`;
+    pop.innerHTML = html;
     pop.querySelectorAll(".combo-opt").forEach(o => o.onclick = () => { const x = matches[+o.dataset.i]; input.value = getLabel(x); close(); opt.onPick && opt.onPick(x); });
+    const add = pop.querySelector(".combo-add"); if (add) add.onclick = () => { pop.classList.remove("open"); opt.onCreate(input.value.trim()); };
   }
-  function open() { renderOpts(); pop.classList.add("open"); }
+  function open() { renderOpts(); pop.classList.add("open"); placePop(input, pop); }
   function close() { pop.classList.remove("open"); }
   wrap.querySelector(".combo-input").onclick = () => open();
   input.onfocus = open;
   input.oninput = () => { open(); opt.onInput && opt.onInput(input.value); };
+  input.onkeydown = keyHandler(input, pop, open, close, () => ai, v => ai = v);
   document.addEventListener("mousedown", e => { if (!wrap.contains(e.target)) close(); });
-  wrap._value = () => input.value.trim();
-  wrap._input = input;
+  wrap._value = () => input.value.trim(); wrap._input = input; wrap._setItems = it => items = it;
   return wrap;
+}
+
+/* popup de cadastro de cidade com seleção de UF (entre as existentes — nunca novo estado) */
+function cadastrarCidade(nome, onDone) {
+  const m = h(`<div class="modal" style="width:440px"><button class="close">×</button><h3>Cadastrar cidade</h3>
+    <div class="grid2"><div class="field"><label>Cidade *</label><input id="cn" value="${esc(nome)}"></div>
+      <div class="field"><label>Estado (UF) *</label><select id="cu">${(B.ufs || []).map(u => `<option>${u}</option>`).join("")}</select></div></div>
+    <div class="muted small">A UF deve ser uma das existentes — não é possível criar um novo estado.</div>
+    <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Adicionar</button></div></div>`);
+  const bg = openModal(m);
+  m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
+  m.querySelector("#sv").onclick = async () => {
+    const nm = val("#cn", m), uf = val("#cu", m);
+    if (!nm) { toast("Informe a cidade", "err"); return; }
+    await api("add_cidade", { nome: nm, uf }); bg.remove(); if (onDone) onDone(nm, uf);
+  };
 }
 
 /* ----------------------------------------------------------------- router */
@@ -277,7 +327,7 @@ async function onDropCard(colKey) {
   }
   viewDocumentos();
 }
-async function delDoc(id) { if (!await confirma("Excluir este documento? Esta ação não pode ser desfeita.")) return; await api("delete_documento", id); toast("Documento excluído", "ok"); viewDocumentos(); }
+async function delDoc(id) { if (!await confirma("Excluir este documento? Esta ação não pode ser desfeita.", { danger: true, ok: "Excluir" })) return; await api("delete_documento", id); toast("Documento excluído", "ok"); viewDocumentos(); }
 
 /* ----------------------------------------------------------------- documento form */
 function blankItem() { return { item_catalogo_id: null, descricao: "", tipo: "servico", quantidade: 1, valor_unitario: 0, desconto: 0 }; }
@@ -323,7 +373,7 @@ async function openDocForm(id) {
       <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div>
     </div>
 
-    <div class="card mt"><h3 class="sec-title">Checklist de Entrada</h3>
+    <div class="card mt" id="checklist-card"><h3 class="sec-title">Checklist de Entrada</h3>
       <div class="muted small" style="margin-bottom:6px">Lataria (marque OK ou Avaria)</div>
       <div class="lataria" id="lataria"></div>
       <div class="grid2 mt">
@@ -351,9 +401,12 @@ async function openDocForm(id) {
     <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancel">Cancelar</button>
       <button class="btn btn-primary" id="salvar">${ic("save", 16)}<span>Salvar Documento</span></button></div>`);
 
-  // tipo -> status options
+  // tipo -> status options + checklist somente em OS
   const fTipo = main().querySelector("#f_tipo"), fStatus = main().querySelector("#f_status");
-  fTipo.onchange = () => { fStatus.innerHTML = statusOptions(fTipo.value, ""); };
+  const checklistCard = main().querySelector("#checklist-card");
+  const toggleChecklist = () => { checklistCard.style.display = fTipo.value === "os" ? "" : "none"; };
+  fTipo.onchange = () => { fStatus.innerHTML = statusOptions(fTipo.value, ""); toggleChecklist(); };
+  toggleChecklist();
 
   // combobox cliente (com cadastro inline)
   const cliCombo = comboSelect(clientes, doc.cliente_id || null, {
@@ -492,7 +545,7 @@ async function viewClientes() {
             ${c.email ? `<span class="mi">${ic("mail", 14)}<span>${esc(c.email)}</span></span>` : ""}
             ${c.cidade ? `<span class="mi">${ic("pin", 14)}<span>${esc(c.cidade)}/${esc(c.uf || "")}</span></span>` : ""}
           </div>
-          <div class="row mt"><button class="btn btn-sm e" style="flex:1">${ic("edit", 15)}<span>Editar</span></button><button class="btn btn-sm btn-danger x">${ic("trash", 15)}</button></div></div>`);
+          <div class="card-foot"><button class="btn btn-sm e" title="Editar">${ic("edit", 15)}</button><button class="btn btn-sm btn-danger x" title="Excluir">${ic("trash", 15)}</button></div></div>`);
         injectIcons(card);
         card.querySelector(".e").onclick = () => formCliente(c);
         card.querySelector(".x").onclick = () => delCliente(c);
@@ -505,11 +558,10 @@ async function viewClientes() {
   main().querySelector("#q").addEventListener("input", reload);
   reload(); window.__reloadClientes = reload;
 }
-async function delCliente(c) { if (await confirma("Excluir cliente?")) { await api("delete_cliente", c.id); toast("Excluído", "ok"); viewClientes(); } }
+async function delCliente(c) { if (await confirma("Excluir este cliente?", { danger: true, ok: "Excluir" })) { await api("delete_cliente", c.id); toast("Excluído", "ok"); viewClientes(); } }
 function formCliente(c, opts) {
   c = Object.assign({}, c || {}, (opts && opts.prefill) || {});
   const m = h(`<div class="modal"><button class="close">×</button><h3>${c.id ? "Editar" : "Novo"} Cliente</h3>
-    ${dl("cid-dl", SUG.cidades)}
     <div class="grid2"><div class="field"><label>Nome *</label><input id="nome" value="${esc(c.nome || "")}"></div>
       <div class="field"><label>CPF/CNPJ</label><input id="cpf" value="${esc(c.cpf_cnpj || "")}"></div></div>
     <div class="grid2"><div class="field"><label>Apelido/Nome Fantasia</label><input id="apelido" value="${esc(c.apelido || "")}"></div>
@@ -521,19 +573,26 @@ function formCliente(c, opts) {
       <div class="field" style="grid-column:span 2"><label>Endereço</label><input id="end" value="${esc(c.endereco || "")}"></div></div>
     <div class="grid2"><div class="field"><label>Número</label><input id="numero" value="${esc(c.numero || "")}"></div>
       <div class="field"><label>Bairro</label><input id="bairro" value="${esc(c.bairro || "")}"></div></div>
-    <div class="grid3"><div class="field"><label>Cidade</label><input id="cid" list="cid-dl" value="${esc(c.cidade || "")}"></div>
-      <div class="field"><label>UF</label><input id="uf" value="${esc(c.uf || "")}"></div><div class="field"></div></div>
+    <div class="grid2"><div class="field"><label>Cidade</label><div id="c_cidade"></div></div>
+      <div class="field"><label>UF</label><input id="uf" value="${esc(c.uf || "")}" readonly placeholder="(definida pela cidade)"></div></div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m);
   bindMask(m.querySelector("#cpf"), mDoc); bindMask(m.querySelector("#tel"), mFone); bindMask(m.querySelector("#wpp"), mFone);
+  const ufField = m.querySelector("#uf");
+  const cidadeCombo = comboText(CITIES, c.cidade || "", {
+    placeholder: "Cidade", getLabel: x => Array.isArray(x) ? x[0] : x, getSub: x => Array.isArray(x) ? x[1] : "",
+    onPick: x => { if (Array.isArray(x)) ufField.value = x[1]; },
+    onCreate: txt => cadastrarCidade(txt, (nm, uf) => { cidadeCombo._input.value = nm; ufField.value = uf; CITIES.push([nm, uf]); }),
+    createLabel: t => `Cadastrar "${t}" (informar UF)`,
+  });
+  m.querySelector("#c_cidade").appendChild(cidadeCombo);
   const cep = m.querySelector("#cep"); bindMask(cep, mCEP);
-  cep.addEventListener("change", () => cepLookup(cep.value, { endereco: m.querySelector("#end"), bairro: m.querySelector("#bairro"), cidade: m.querySelector("#cid"), uf: m.querySelector("#uf") }));
-  m.querySelector("#uf").addEventListener("input", e => e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2));
+  cep.addEventListener("change", () => cepLookup(cep.value, { endereco: m.querySelector("#end"), bairro: m.querySelector("#bairro"), cidade: cidadeCombo._input, uf: ufField }));
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
   m.querySelector("#sv").onclick = async () => {
     const payload = { id: c.id, nome: val("#nome", m), cpf_cnpj: val("#cpf", m), apelido: val("#apelido", m), rg_ie: val("#rgie", m),
       telefone: val("#tel", m), whatsapp: val("#wpp", m), email: val("#email", m), endereco: val("#end", m),
-      numero: val("#numero", m), bairro: val("#bairro", m), cidade: val("#cid", m), uf: val("#uf", m), cep: val("#cep", m) };
+      numero: val("#numero", m), bairro: val("#bairro", m), cidade: cidadeCombo._value(), uf: ufField.value.trim(), cep: val("#cep", m) };
     if (!payload.nome || !payload.telefone) { toast("Nome e Telefone são obrigatórios", "err"); return; }
     const saved = await api("save_cliente", payload); await refreshSug(); toast("Cliente salvo", "ok"); bg.remove();
     if (opts && opts.onSaved) opts.onSaved(saved); else if (window.__reloadClientes) window.__reloadClientes();
@@ -576,7 +635,7 @@ async function viewVeiculos() {
             ${v.combustivel ? `<span class="mi">${ic("trending", 14)}<span>${esc(v.combustivel)}</span></span>` : ""}
             <span class="mi">${ic("user", 14)}<span>${esc(v.cliente_nome || "sem proprietário")}</span></span>
           </div>
-          <div class="row mt"><button class="btn btn-sm e" style="flex:1">${ic("edit", 15)}<span>Editar</span></button><button class="btn btn-sm btn-danger x">${ic("trash", 15)}</button></div></div>`);
+          <div class="card-foot"><button class="btn btn-sm e" title="Editar">${ic("edit", 15)}</button><button class="btn btn-sm btn-danger x" title="Excluir">${ic("trash", 15)}</button></div></div>`);
         injectIcons(card);
         card.querySelector(".e").onclick = () => formVeiculo(v, clientes);
         card.querySelector(".x").onclick = () => delVeiculo(v);
@@ -589,7 +648,7 @@ async function viewVeiculos() {
   main().querySelector("#q").addEventListener("input", reload);
   reload(); window.__reloadVeiculos = reload;
 }
-async function delVeiculo(v) { if (await confirma("Excluir veículo?")) { await api("delete_veiculo", v.id); toast("Excluído", "ok"); viewVeiculos(); } }
+async function delVeiculo(v) { if (await confirma("Excluir este veículo?", { danger: true, ok: "Excluir" })) { await api("delete_veiculo", v.id); toast("Excluído", "ok"); viewVeiculos(); } }
 function formVeiculo(v, clientes, opts) {
   v = Object.assign({}, v || {}, (opts && opts.prefill) || {});
   const m = h(`<div class="modal"><button class="close">×</button><h3>${v.id ? "Editar" : "Novo"} Veículo</h3>
@@ -656,7 +715,7 @@ async function viewProdutos() {
             <div style="min-width:0"><div style="font-weight:700;font-size:15px">${esc(i.nome)} ${badge(i)}</div><div class="small muted">${esc(i.descricao || "")}</div></div></div>
           <div class="money" style="margin-top:10px;font-size:20px">${money(i.preco)}</div>
           <div class="small muted">${i.ativo ? "Ativo" : "Inativo"}</div>
-          <div class="row mt"><button class="btn btn-sm e" style="flex:1">${ic("edit", 15)}<span>Editar</span></button><button class="btn btn-sm btn-danger x">${ic("trash", 15)}</button></div></div>`);
+          <div class="card-foot"><button class="btn btn-sm e" title="Editar">${ic("edit", 15)}</button><button class="btn btn-sm btn-danger x" title="Excluir">${ic("trash", 15)}</button></div></div>`);
         injectIcons(card);
         card.querySelector(".e").onclick = () => formItem(i);
         card.querySelector(".x").onclick = () => delItem(i);
@@ -669,7 +728,7 @@ async function viewProdutos() {
   main().querySelector("#q").addEventListener("input", reload);
   reload(); window.__reloadItens = reload;
 }
-async function delItem(i) { if (await confirma("Excluir item?")) { await api("delete_item", i.id); toast("Excluído", "ok"); viewProdutos(); } }
+async function delItem(i) { if (await confirma("Excluir este item?", { danger: true, ok: "Excluir" })) { await api("delete_item", i.id); toast("Excluído", "ok"); viewProdutos(); } }
 function formItem(i) {
   i = i || { tipo: "servico", ativo: 1, preco: 0 };
   const m = h(`<div class="modal" style="width:560px"><button class="close">×</button><h3>${i.id ? "Editar" : "Novo"} Item</h3>
@@ -749,6 +808,7 @@ async function start() {
   window.__p = "ui-ready";
   try { B = await api("bootstrap"); window.__p = "bootstrap-ok"; } catch (e) { window.__p = "bootstrap-err:" + e.message; }
   try { SUG = await api("sugestoes"); window.__p = "sug-ok"; } catch (e) { window.__p = "sug-err:" + e.message; }
+  try { CITIES = await api("cidades"); } catch (e) { CITIES = []; }
   setView("dashboard");
   window.__p = "done";
 }

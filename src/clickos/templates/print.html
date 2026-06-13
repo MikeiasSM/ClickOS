@@ -117,7 +117,8 @@
     </tr>
   </table>
 
-  <!-- CHECKLIST DE ENTRADA -->
+  {% if doc.tipo == 'os' %}
+  <!-- CHECKLIST DE ENTRADA (somente Ordem de Serviço) -->
   <div class="sec mt">CHECKLIST DE ENTRADA DO VEÍCULO</div>
   <table class="lat">
     <tr>
@@ -155,6 +156,8 @@
     </tr>
     <tr><td class="lbl">Obs. de Entrada</td><td colspan="3">{{ doc.obs_entrada or '' }}</td></tr>
   </table>
+
+  {% endif %}
 
   <!-- SERVIÇOS / PRODUTOS -->
   <div class="sec mt">SERVIÇOS / PRODUTOS</div>
