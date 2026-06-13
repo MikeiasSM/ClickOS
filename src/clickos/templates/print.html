@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>{{ doc.numero }}</title>
+<style>
+  @page { size: A4 portrait; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, "Segoe UI", sans-serif; font-size: 10px; color: #000; margin: 0; }
+  .doc { width: 100%; }
+  table { width: 100%; border-collapse: collapse; }
+  .b { border: 1px solid #000; }
+  .sec { background: #d9d9d9; font-weight: bold; font-size: 10.5px; padding: 2px 4px; border: 1px solid #000; }
+  td, th { padding: 2px 4px; vertical-align: middle; }
+  .lbl { font-weight: bold; font-size: 8.5px; }
+  .val { border-bottom: 1px solid #999; min-height: 12px; }
+  .hd { width: 100%; border: 1px solid #000; }
+  .hd td { vertical-align: middle; }
+  .logo-cell { width: 26%; text-align: center; border-right: 1px solid #000; }
+  .logo-cell img { max-width: 92%; max-height: 64px; }
+  .emp { text-align: center; }
+  .emp .nome { font-size: 14px; font-weight: bold; }
+  .emp .det { font-size: 8.5px; line-height: 1.25; }
+  .meta { width: 24%; border-left: 1px solid #000; font-size: 9px; }
+  .meta td { padding: 1px 4px; }
+  .slogan { text-align: center; font-style: italic; font-size: 8.5px; background: #f2f2f2;
+            border: 1px solid #000; border-top: 0; padding: 1px; }
+  .tipo { font-weight: bold; font-size: 12px; text-align: center; border: 1px solid #000; border-top: 0;
+          padding: 2px; }
+  .grid2 td { width: 50%; vertical-align: top; }
+  .fields td { border: 1px solid #000; }
+  .bx { display: inline-block; width: 9px; height: 9px; border: 1px solid #000; vertical-align: middle; }
+  .bx.on { background: #000; }
+  .lat td { border: 1px solid #000; font-size: 9px; }
+  .lat .n { width: 16px; text-align: center; }
+  .lat .m { width: 92px; white-space: nowrap; text-align: right; }
+  .itens th { background: #d9d9d9; border: 1px solid #000; font-size: 9px; }
+  .itens td { border: 1px solid #000; font-size: 9px; }
+  .right { text-align: right; }
+  .center { text-align: center; }
+  .resumo td { padding: 2px 6px; }
+  .resumo .tot { font-size: 12px; font-weight: bold; }
+  .assin { margin-top: 14px; }
+  .assin td { text-align: center; font-size: 8.5px; padding-top: 16px; }
+  .line { border-top: 1px solid #000; padding-top: 2px; }
+  .foot { text-align: center; font-size: 8px; color: #555; margin-top: 6px; }
+  .mt { margin-top: 5px; }
+  h-spacer { display:block; height:5px; }
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <!-- CABEÇALHO -->
+  <table class="hd">
+    <tr>
+      <td class="logo-cell">{% if logo_uri %}<img src="{{ logo_uri }}" alt="logo">{% else %}<b>LOGO</b>{% endif %}</td>
+      <td class="emp">
+        <div class="nome">{{ empresa.razao_social or '' }}</div>
+        <div class="det">
+          CNPJ: {{ empresa.cnpj or '' }} &nbsp;&nbsp; I.E.: {{ empresa.ie or '' }}<br>
+          {{ empresa.endereco or '' }}{% if empresa.cidade %} - {{ empresa.cidade }}/{{ empresa.uf }}{% endif %}{% if empresa.cep %} - CEP: {{ empresa.cep }}{% endif %}<br>
+          Tel: {{ empresa.telefone or '' }} &nbsp;&nbsp; WhatsApp: {{ empresa.whatsapp or '' }}
+        </div>
+      </td>
+      <td class="meta">
+        <table>
+          <tr><td class="lbl">Nº DOC.</td><td><b>{{ doc.numero }}</b></td></tr>
+          <tr><td class="lbl">DATA</td><td>{{ doc.data_abertura|dt }}</td></tr>
+          <tr><td class="lbl">STATUS</td><td>{{ doc.status }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+  {% if empresa.slogan %}<div class="slogan">{{ empresa.slogan }}</div>{% endif %}
+  <div class="tipo">{{ 'ORDEM DE SERVIÇO' if doc.tipo == 'os' else 'ORÇAMENTO' }}</div>
+
+  <!-- DADOS DO CLIENTE -->
+  <div class="sec mt">DADOS DO CLIENTE</div>
+  <table class="fields">
+    <tr>
+      <td class="lbl" style="width:14%">Razão Social / Nome</td><td style="width:38%">{{ cliente.nome or doc.cliente_nome or '' }}</td>
+      <td class="lbl" style="width:14%">CPF / CNPJ</td><td>{{ cliente.cpf_cnpj or '' }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Nome Fant./Apelido</td><td>{{ cliente.apelido or '' }}</td>
+      <td class="lbl">RG / IE</td><td>{{ cliente.rg_ie or '' }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Endereço</td>
+      <td colspan="3">{{ cliente.endereco or '' }}{% if cliente.numero %}, {{ cliente.numero }}{% endif %}{% if cliente.bairro %} - {{ cliente.bairro }}{% endif %}{% if cliente.cidade %} - {{ cliente.cidade }}/{{ cliente.uf }}{% endif %}{% if cliente.cep %} - CEP: {{ cliente.cep }}{% endif %}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Telefone</td><td>{{ cliente.telefone or '' }}</td>
+      <td class="lbl">WhatsApp / E-mail</td><td>{{ cliente.whatsapp or '' }} {% if cliente.email %}· {{ cliente.email }}{% endif %}</td>
+    </tr>
+  </table>
+
+  <!-- DADOS DO VEÍCULO -->
+  <div class="sec mt">DADOS DO VEÍCULO</div>
+  <table class="fields">
+    <tr>
+      <td class="lbl" style="width:14%">Placa</td><td style="width:36%">{{ veiculo.placa or doc.veiculo_placa or '' }}</td>
+      <td class="lbl" style="width:14%">Marca / Modelo</td><td>{{ veiculo.marca or '' }} {{ veiculo.modelo or '' }}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Versão</td><td>{{ veiculo.versao or '' }}</td>
+      <td class="lbl">Ano (Fab./Mod.)</td><td>{{ veiculo.ano_fab or '' }}{% if veiculo.ano_modelo %}/{{ veiculo.ano_modelo }}{% endif %}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Cor</td><td>{{ veiculo.cor or '' }}</td>
+      <td class="lbl">Chassi / Renavam</td><td>{{ veiculo.chassi or '' }} {% if veiculo.renavam %}· {{ veiculo.renavam }}{% endif %}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Combustível</td><td>{{ veiculo.combustivel or '' }}</td>
+      <td class="lbl">Quilometragem (entrada)</td><td>{{ doc.km_entrada or '' }}</td>
+    </tr>
+  </table>
+
+  <!-- CHECKLIST DE ENTRADA -->
+  <div class="sec mt">CHECKLIST DE ENTRADA DO VEÍCULO</div>
+  <table class="lat">
+    <tr>
+      <td colspan="3" style="background:#f2f2f2"><b>LATARIA (OK / Avaria)</b></td>
+      <td colspan="3" style="background:#f2f2f2"><b>LATARIA (continuação)</b></td>
+    </tr>
+    {% set metade = (doc.lataria|length + 1)//2 %}
+    {% for i in range(metade) %}
+    {% set e = doc.lataria[i] %}
+    {% set d = doc.lataria[metade + i] if (metade + i) < doc.lataria|length else None %}
+    <tr>
+      <td class="n">{{ i+1 }}</td><td>{{ e.peca }}</td>
+      <td class="m"><span class="bx {{ 'on' if e.estado=='OK' }}"></span> OK &nbsp; <span class="bx {{ 'on' if e.estado=='Avaria' }}"></span> Av.</td>
+      {% if d %}
+      <td class="n">{{ metade+i+1 }}</td><td>{{ d.peca }}</td>
+      <td class="m"><span class="bx {{ 'on' if d.estado=='OK' }}"></span> OK &nbsp; <span class="bx {{ 'on' if d.estado=='Avaria' }}"></span> Av.</td>
+      {% else %}<td></td><td></td><td></td>{% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  <table class="fields mt">
+    <tr>
+      <td class="lbl" style="width:18%">Estado Geral</td><td>{{ doc.estado_geral or '' }}</td>
+      <td class="lbl" style="width:14%">Combustível</td>
+      <td>{% for n in niveis %}<span class="bx {{ 'on' if doc.nivel_combustivel==n }}"></span> {{ n }} &nbsp;{% endfor %}</td>
+    </tr>
+    <tr>
+      <td class="lbl">Itens Entregues</td>
+      <td colspan="3">
+        <span class="bx {{ 'on' if doc.item_chave_principal }}"></span> Chave Principal &nbsp;&nbsp;
+        <span class="bx {{ 'on' if doc.item_chave_reserva }}"></span> Chave Reserva &nbsp;&nbsp;
+        <span class="bx {{ 'on' if doc.item_documento }}"></span> Documento &nbsp;&nbsp;
+        <span class="bx {{ 'on' if doc.item_manual }}"></span> Manual
+      </td>
+    </tr>
+    <tr><td class="lbl">Obs. de Entrada</td><td colspan="3">{{ doc.obs_entrada or '' }}</td></tr>
+  </table>
+
+  <!-- SERVIÇOS / PRODUTOS -->
+  <div class="sec mt">SERVIÇOS / PRODUTOS</div>
+  <table class="itens">
+    <tr>
+      <th style="width:5%">Nº</th><th>Descrição (serviço / produto)</th>
+      <th style="width:8%">Qtd</th><th style="width:15%">Vlr Bruto</th>
+      <th style="width:13%">Desconto</th><th style="width:15%">Vlr Líquido</th>
+    </tr>
+    {% for it in doc.itens %}
+    <tr>
+      <td class="center">{{ loop.index }}</td>
+      <td>{{ it.descricao or '' }}</td>
+      <td class="center">{{ (it.quantidade|int) if it.quantidade == it.quantidade|int else it.quantidade }}</td>
+      <td class="right">{{ it.valor_unitario|brl }}</td>
+      <td class="right">{{ it.desconto|brl }}</td>
+      <td class="right">{{ it.valor_liquido|brl }}</td>
+    </tr>
+    {% endfor %}
+    {% for _ in range(6 - (doc.itens|length if doc.itens|length < 6 else 0)) %}
+    <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+    {% endfor %}
+  </table>
+
+  <!-- RESUMO -->
+  <table class="resumo mt">
+    <tr>
+      <td style="width:60%"></td>
+      <td class="lbl right">Serviços</td><td class="right b">{{ doc.subtotal|brl }}</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td class="lbl right">Desconto / Acréscimo</td>
+      <td class="right b">- {{ doc.desconto_geral|brl }} / + {{ doc.acrescimo|brl }}</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td class="lbl right tot">TOTAL GERAL</td><td class="right b tot">{{ doc.total|brl }}</td>
+    </tr>
+  </table>
+
+  <!-- CONDIÇÕES -->
+  <div class="sec mt">CONDIÇÕES COMERCIAIS</div>
+  <table class="fields">
+    <tr>
+      <td class="lbl" style="width:18%">Forma de Pagamento</td><td>{{ doc.forma_pagamento or '' }}</td>
+      <td class="lbl" style="width:16%">Prazo de Execução</td><td>{{ doc.prazo_execucao or '' }}</td>
+      <td class="lbl" style="width:12%">Validade</td><td>{{ doc.validade or '' }}</td>
+    </tr>
+    {% if doc.observacoes %}<tr><td class="lbl">Observações</td><td colspan="5">{{ doc.observacoes }}</td></tr>{% endif %}
+  </table>
+
+  <!-- ASSINATURAS -->
+  <table class="assin">
+    <tr>
+      <td style="width:48%"><div class="line">Assinatura do Cliente — Nome / Data</div></td>
+      <td style="width:4%"></td>
+      <td style="width:48%"><div class="line">Responsável pela Empresa — Nome / Data</div></td>
+    </tr>
+  </table>
+
+  <div class="foot">Documento gerado em {{ gerado_em }} — ClickOS</div>
+</div>
+</body>
+</html>
