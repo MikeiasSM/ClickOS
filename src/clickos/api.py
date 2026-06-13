@@ -32,13 +32,14 @@ def _api(fn):
 class Api:
     def __init__(self, con):
         self.con = con
-        self.window = None  # definido pelo main após criar a janela
 
     def _win(self):
-        if self.window:
-            return self.window
-        if webview.windows:
-            return webview.windows[0]
+        # IMPORTANTE: não armazenar a janela como atributo de Api. O pywebview
+        # percorre os atributos do objeto exposto para gerar a API JS e quebra
+        # ao recursar na janela (objetos .NET). Buscamos a janela sob demanda.
+        wins = webview.windows
+        if wins:
+            return wins[0]
         raise RuntimeError("Janela indisponível para abrir o diálogo.")
 
     # ----------------------------------------------------------------- bootstrap / dashboard

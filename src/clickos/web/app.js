@@ -547,11 +547,18 @@ function bindNav() {
   document.getElementById("btn-restore").onclick = doRestore;
 }
 async function start() {
-  try { B = await api("bootstrap"); } catch (e) {}
-  await refreshSug();
+  // UI básica primeiro (não depende da API): garante ícones e navegação mesmo se a API demorar.
+  window.__p = "begin";
   injectIcons(document);
   bindNav();
+  window.__p = "ui-ready";
+  try { B = await api("bootstrap"); window.__p = "bootstrap-ok"; } catch (e) { window.__p = "bootstrap-err:" + e.message; }
+  try { SUG = await api("sugestoes"); window.__p = "sug-ok"; } catch (e) { window.__p = "sug-err:" + e.message; }
   setView("dashboard");
+  window.__p = "done";
 }
+window.__err = "";
+window.addEventListener("error", e => { window.__err = (e.message || "") + " @ " + (e.filename || "") + ":" + (e.lineno || ""); });
+window.addEventListener("unhandledrejection", e => { window.__err = "reject: " + String(e.reason); });
 if (window.pywebview && window.pywebview.api) start();
 else window.addEventListener("pywebviewready", start);
