@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickOS — Gestão de Ordens</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-ico">📄</div>
+        <div>
+          <div class="brand-name">ClickOS</div>
+          <div class="brand-sub">Gestão de Ordens</div>
+        </div>
+      </div>
+      <div class="menu-title">MENU PRINCIPAL</div>
+      <nav class="menu">
+        <a data-view="dashboard" class="active">📊 Dashboard</a>
+        <a data-view="documentos">📄 Ordens / Orçamentos</a>
+        <a data-view="clientes">👥 Clientes</a>
+        <a data-view="veiculos">🚗 Veículos</a>
+        <a data-view="produtos">📦 Produtos e Serviços</a>
+        <a data-view="empresa">🏢 Dados da Empresa</a>
+      </nav>
+      <div class="sidebar-foot">
+        <button id="btn-backup" class="btn btn-ghost btn-sm">💾 Fazer backup</button>
+      </div>
+    </aside>
+    <main id="main" class="main"></main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+  <iframe id="print-frame" style="position:fixed;width:0;height:0;border:0;left:-9999px"></iframe>
+
+  <script src="app.js"></script>
+</body>
+</html>

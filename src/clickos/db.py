@@ -98,7 +98,8 @@ CATALOGO_EXEMPLO = [
 def connect(path=None) -> sqlite3.Connection:
     """Abre a conexão, garante schema e seed. Retorna conexão com row_factory=Row."""
     target = Path(path) if path is not None else paths.db_path()
-    con = sqlite3.connect(str(target))
+    # check_same_thread=False: o pywebview chama a API em thread diferente da criação
+    con = sqlite3.connect(str(target), check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     _migrate(con)
