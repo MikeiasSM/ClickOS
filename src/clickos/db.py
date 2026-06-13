@@ -14,6 +14,16 @@ LISTA_PECAS = [
 ]
 
 NIVEIS_COMBUSTIVEL = ["Reserva", "1/4", "1/2", "3/4", "Cheio"]
+
+# Sugestões iniciais (autocomplete que cresce com o que o usuário cadastra)
+SUG_MARCAS = ["Chevrolet", "Volkswagen", "Fiat", "Ford", "Toyota", "Honda", "Hyundai", "Renault",
+              "Nissan", "Jeep", "Peugeot", "Citroën", "Mitsubishi", "Kia", "BMW", "Mercedes-Benz",
+              "RAM", "Iveco", "Agrale", "Volvo"]
+SUG_CORES = ["Branco", "Preto", "Prata", "Cinza", "Vermelho", "Azul", "Verde", "Amarelo",
+             "Marrom", "Bege", "Dourado", "Vinho", "Grafite", "Laranja"]
+SUG_COMBUSTIVEIS = ["Gasolina", "Etanol", "Flex", "Diesel", "GNV", "Híbrido", "Elétrico"]
+SUG_CIDADES = ["Luís Eduardo Magalhães", "Barreiras", "São Desidério", "Riachão das Neves",
+               "Catolândia", "Baianópolis", "Angical", "Salvador"]
 STATUS_LISTA = ["Aberta", "Em Análise", "Aprovado", "Em Execução", "Concluído", "Entregue", "Cancelado"]
 ESTADO_GERAL_LISTA = ["Sem avarias aparentes", "Com avarias registradas"]
 FORMAS_PAGAMENTO = ["Dinheiro", "PIX", "Cartão de Débito", "Cartão de Crédito",

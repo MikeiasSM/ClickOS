@@ -120,7 +120,8 @@ class _Veiculos:
 
 # --------------------------------------------------------------------------- itens_catalogo
 class _Itens:
-    FIELDS = ["nome", "descricao", "tipo", "unidade", "preco", "ativo"]
+    # "unidade" removido da UI; mantém o default do schema e não é mais sobrescrito.
+    FIELDS = ["nome", "descricao", "tipo", "preco", "ativo"]
 
     def create(self, con, data, stamp=None):
         now = _now(stamp)
@@ -248,6 +249,30 @@ class _Documentos:
     def delete(self, con, did):
         con.execute("DELETE FROM documentos WHERE id=?", (did,))
         con.commit()
+
+
+def sugestoes(con):
+    """Listas de autocomplete (seed + valores já cadastrados pelo usuário)."""
+    def distinct(table, col):
+        return [r[0] for r in con.execute(
+            f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL AND TRIM({col})<>'' "
+            f"ORDER BY {col} COLLATE NOCASE")]
+
+    def merge(seed, extra):
+        seen, out = set(), []
+        for v in list(seed) + list(extra):
+            k = (v or "").strip().lower()
+            if v and k not in seen:
+                seen.add(k)
+                out.append(v)
+        return out
+
+    return {
+        "marcas": merge(dbmod.SUG_MARCAS, distinct("veiculos", "marca")),
+        "cores": merge(dbmod.SUG_CORES, distinct("veiculos", "cor")),
+        "combustiveis": merge(dbmod.SUG_COMBUSTIVEIS, distinct("veiculos", "combustivel")),
+        "cidades": merge(dbmod.SUG_CIDADES, distinct("clientes", "cidade")),
+    }
 
 
 clientes = _Clientes()

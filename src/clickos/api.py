@@ -1,8 +1,11 @@
 """API exposta ao JavaScript (ponte pywebview). Cada método retorna {ok, data|erro}."""
 import functools
+import shutil
 from datetime import datetime
+from pathlib import Path
 
-from . import backup as bk
+import webview
+
 from . import db as dbmod
 from . import paths
 from . import printing
@@ -29,8 +32,20 @@ def _api(fn):
 class Api:
     def __init__(self, con):
         self.con = con
+        self.window = None  # definido pelo main após criar a janela
+
+    def _win(self):
+        if self.window:
+            return self.window
+        if webview.windows:
+            return webview.windows[0]
+        raise RuntimeError("Janela indisponível para abrir o diálogo.")
 
     # ----------------------------------------------------------------- bootstrap / dashboard
+    @_api
+    def sugestoes(self):
+        return repo.sugestoes(self.con)
+
     @_api
     def bootstrap(self):
         return {
@@ -171,17 +186,43 @@ class Api:
         return self._empresa_sem_logo()
 
     @_api
-    def update_logo(self, payload):
-        from pathlib import Path
-        data = Path(payload["path"]).read_bytes()
-        self.con.execute("UPDATE empresa SET logo=? WHERE id=1", (data,))
+    def escolher_logo(self):
+        """Abre o diálogo nativo para escolher a imagem do logo e a salva no banco (BLOB)."""
+        res = self._win().create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=False,
+            file_types=("Imagens (*.png;*.jpg;*.jpeg;*.bmp)", "Todos os arquivos (*.*)"))
+        if not res:
+            return {"cancelado": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        self.con.execute("UPDATE empresa SET logo=? WHERE id=1", (Path(path).read_bytes(),))
         self.con.commit()
         return {"has_logo": True}
 
-    # ----------------------------------------------------------------- backup
+    # ----------------------------------------------------------------- backup / restore
     @_api
     def backup(self):
+        """Pergunta onde salvar (diálogo nativo) e copia o banco para lá."""
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        res = self._win().create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=f"clickos-backup-{stamp}.db",
+            file_types=("Banco ClickOS (*.db)", "Todos os arquivos (*.*)"))
+        if not res:
+            return {"cancelado": True}
+        dest = res if isinstance(res, str) else res[0]
         self.con.commit()
-        arquivo = bk.backup(paths.db_path(), paths.backups_dir(),
-                            datetime.now().strftime("%Y%m%d-%H%M%S"))
-        return {"arquivo": arquivo}
+        shutil.copy2(str(dbmod.paths.db_path()), dest)
+        return {"arquivo": dest}
+
+    @_api
+    def restore(self):
+        """Escolhe um arquivo de backup e substitui o banco atual (reabre a conexão)."""
+        res = self._win().create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=False,
+            file_types=("Banco ClickOS (*.db)", "Todos os arquivos (*.*)"))
+        if not res:
+            return {"cancelado": True}
+        src = res[0] if isinstance(res, (list, tuple)) else res
+        self.con.close()
+        shutil.copy2(src, str(dbmod.paths.db_path()))
+        self.con = dbmod.connect(dbmod.paths.db_path())
+        return {"restaurado": True}
