@@ -42,6 +42,8 @@ const ICONS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   key: '<path d="M21 2l-2 2"/><path d="M14.5 6.5 18 10"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m11.5 11.5 8-8 2 2"/>',
+  palette: '<circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996C18.49 15.39 22 11.9 22 7.5 22 4.42 17.5 2 12 2z"/>',
+  droplet: '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 function ic(name, size) {
@@ -111,6 +113,44 @@ function confirma(msg, opts) {
   });
 }
 function render(html) { main().innerHTML = html; injectIcons(main()); }
+
+/* markdown mínimo (offline, sem libs): cabeçalhos, negrito/itálico, código, listas, links, regra, quebras */
+function mdToHtml(md) {
+  // sentinelas em área de uso privado Unicode (\uE0xx): improváveis no texto do usuário,
+  // evitando colisão com tokens digitados; esc() é aplicado ANTES (sem risco de XSS).
+  let s = esc(md || "");
+  const blocos = [];
+  s = s.replace(/```([\s\S]*?)```/g, (m, c) => { blocos.push(`<pre>${c.replace(/^\n/, "")}</pre>`); return `\n${blocos.length - 1}\n`; });
+  const linhas = s.split(/\r?\n/);
+  let out = "", lista = null;  // 'ul' | 'ol' | null
+  const fechaLista = () => { if (lista) { out += `</${lista}>`; lista = null; } };
+  const inline = t => {
+    const codes = [];
+    t = t.replace(/`([^`]+)`/g, (m, c) => { codes.push(c); return `${codes.length - 1}`; });  // protege code spans
+    t = t
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return t.replace(/(\d+)/g, (m, i) => `<code>${codes[+i]}</code>`);
+  };
+  for (let ln of linhas) {
+    const m0 = ln.match(/^(\d+)$/);
+    if (m0) { fechaLista(); out += blocos[+m0[1]] || ""; continue; }
+    if (/^\s*$/.test(ln)) { fechaLista(); continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(ln)) { fechaLista(); out += "<hr>"; continue; }
+    let m = ln.match(/^(#{1,6})\s+(.*)$/);
+    if (m) { fechaLista(); const n = m[1].length; out += `<h${n}>${inline(m[2])}</h${n}>`; continue; }
+    m = ln.match(/^\s*[-*]\s+(.*)$/);
+    if (m) { if (lista !== "ul") { fechaLista(); out += "<ul>"; lista = "ul"; } out += `<li>${inline(m[1])}</li>`; continue; }
+    m = ln.match(/^\s*\d+\.\s+(.*)$/);
+    if (m) { if (lista !== "ol") { fechaLista(); out += "<ol>"; lista = "ol"; } out += `<li>${inline(m[1])}</li>`; continue; }
+    fechaLista(); out += `<p>${inline(ln)}</p>`;
+  }
+  fechaLista();
+  return out;
+}
 
 /* ----------------------------------------------------------------- componentes v3 */
 function emptyState(icon, title, sub, ctaLabel, ctaFn) {
@@ -797,8 +837,8 @@ async function viewVeiculos() {
             <div style="min-width:0"><div style="font-weight:700;font-size:15px">${esc(v.placa)}</div><div class="small muted">${esc(v.marca || "")} ${esc(v.modelo || "")}</div></div></div>
           <div class="entity-meta">
             ${v.ano_fab ? `<span class="mi">${ic("tag", 14)}<span>Ano ${esc(v.ano_fab)}</span></span>` : ""}
-            ${v.cor ? `<span class="mi">${ic("box", 14)}<span>${esc(v.cor)}</span></span>` : ""}
-            ${v.combustivel ? `<span class="mi">${ic("trending", 14)}<span>${esc(v.combustivel)}</span></span>` : ""}
+            ${v.cor ? `<span class="mi">${ic("palette", 14)}<span>${esc(v.cor)}</span></span>` : ""}
+            ${v.combustivel ? `<span class="mi">${ic("droplet", 14)}<span>${esc(v.combustivel)}</span></span>` : ""}
             <span class="mi">${ic("user", 14)}<span>${esc(v.cliente_nome || "sem proprietário")}</span></span>
           </div>
           <div class="card-foot"><button class="btn btn-sm e" title="Editar">${ic("edit", 15)}</button><button class="btn btn-sm btn-danger x" title="Excluir">${ic("trash", 15)}</button></div></div>`);
@@ -935,37 +975,81 @@ async function renderEmpresa(container) {
     <div class="card"><div class="logo-box">
       <div class="logo-prev ${logo.uri ? "" : "empty"}" id="logo-prev">${logo.uri ? `<img src="${logo.uri}">` : "Sem logo"}</div>
       <div><div style="font-weight:700;margin-bottom:2px">Logotipo</div><div class="muted small" style="margin-bottom:8px">Aparece no topo dos documentos impressos.</div>
-        <button class="btn btn-sm" id="logo">${ic("image", 15)}<span>Escolher arquivo…</span></button></div></div></div>
+        <button class="btn btn-sm" id="logo">${ic("image", 15)}<span>Escolher arquivo…</span></button>
+        <button class="btn btn-sm btn-danger" id="logodel" style="${logo.uri ? "" : "display:none"}">${ic("trash", 15)}<span>Remover</span></button></div></div></div>
     <div class="card mt"><h3 class="sec-title">Identificação</h3>
       <div class="field"><label>Razão Social *</label><input id="razao" value="${esc(e.razao_social || "")}"></div>
       <div class="grid2"><div class="field"><label>Nome Fantasia</label><input id="fant" value="${esc(e.nome_fantasia || "")}"></div>
-        <div class="field"><label>CNPJ</label><input id="cnpj" value="${esc(e.cnpj || "")}"></div></div>
+        <div class="field"><label>CNPJ</label><input id="cnpj" value="${esc(e.cnpj || "")}" placeholder="00.000.000/0000-00"></div></div>
       <div class="grid2"><div class="field"><label>Inscrição Estadual</label><input id="ie" value="${esc(e.ie || "")}"></div>
         <div class="field"><label>Slogan</label><input id="slogan" value="${esc(e.slogan || "")}"></div></div></div>
     <div class="card mt"><h3 class="sec-title">Contato</h3>
-      <div class="grid3"><div class="field"><label>Telefone</label><input id="tel" value="${esc(e.telefone || "")}"></div>
-        <div class="field"><label>WhatsApp</label><input id="wpp" value="${esc(e.whatsapp || "")}"></div>
+      <div class="grid3"><div class="field"><label>Telefone</label><input id="tel" value="${esc(e.telefone || "")}" placeholder="(00) 0000-0000"></div>
+        <div class="field"><label>WhatsApp</label><input id="wpp" value="${esc(e.whatsapp || "")}" placeholder="(00) 00000-0000"></div>
         <div class="field"><label>E-mail</label><input id="email" value="${esc(e.email || "")}"></div></div>
       <div class="field"><label>Site</label><input id="site" value="${esc(e.site || "")}"></div></div>
     <div class="card mt"><h3 class="sec-title">Endereço</h3>
-      <div class="grid2"><div class="field"><label>Endereço</label><input id="end" value="${esc(e.endereco || "")}"></div>
-        <div class="field"><label>Bairro</label><input id="bairro" value="${esc(e.bairro || "")}"></div></div>
-      <div class="grid3"><div class="field"><label>Cidade</label><input id="cid" value="${esc(e.cidade || "")}"></div>
-        <div class="field"><label>UF</label><input id="uf" value="${esc(e.uf || "")}"></div>
-        <div class="field"><label>CEP</label><input id="cep" value="${esc(e.cep || "")}"></div></div></div>
+      <div class="muted small" style="margin-bottom:10px">Digite o CEP para carregar o endereço automaticamente — você ainda pode ajustar os campos.</div>
+      <div class="grid3"><div class="field"><label>CEP</label><input id="cep" value="${esc(e.cep || "")}" placeholder="00000-000"></div>
+        <div class="field" style="grid-column:span 2"><label>Endereço</label><input id="end" value="${esc(e.endereco || "")}"></div></div>
+      <div class="grid2"><div class="field"><label>Bairro</label><input id="bairro" value="${esc(e.bairro || "")}"></div>
+        <div class="field"><label>Cidade</label><div id="c_cidade"></div></div></div>
+      <div class="grid2"><div class="field"><label>UF</label><input id="uf" value="${esc(e.uf || "")}" readonly placeholder="(definida pela cidade)"></div>
+        <div></div></div></div>
     <div class="card mt"><h3 class="sec-title">Texto Padrão nas OS</h3>
       <div class="field"><label>Observações / Termos padrão</label><textarea id="termos">${esc(e.termos_padrao || "")}</textarea></div></div>
-    <div class="between mt"><span></span><button class="btn btn-primary" id="sv">${ic("save", 16)}<span>Salvar Dados</span></button></div>`;
+    <div class="card mt"><div class="between" style="align-items:center"><h3 class="sec-title" style="margin:0">Termo de Garantia</h3>
+        <button class="btn btn-sm" id="gprev">${ic("eye", 15)}<span>Pré-visualizar</span></button></div>
+      <div class="muted small" style="margin:4px 0 8px">Suporta <b>Markdown</b> (negrito <code>**texto**</code>, itálico <code>*texto*</code>, listas <code>-</code>, títulos <code>#</code>, links). Será incluído na abertura da Ordem de Serviço.</div>
+      <textarea id="garantia" maxlength="15000" style="min-height:170px">${esc(e.termo_garantia || "")}</textarea>
+      <div id="gpreview" class="md-preview" style="display:none"></div>
+      <div class="muted small" id="gcount" style="text-align:right;margin-top:4px"></div></div>
+    <div class="between mt" style="margin-bottom:30px"><span></span><button class="btn btn-primary" id="sv">${ic("save", 16)}<span>Salvar Dados</span></button></div>`;
   injectIcons(container);
+  // máscaras de identificação/contato
+  bindMask(container.querySelector("#cnpj"), mDoc);
+  bindMask(container.querySelector("#tel"), mFone);
+  bindMask(container.querySelector("#wpp"), mFone);
+  // endereço com a mesma lógica da Pessoa: CEP -> busca; Cidade (combo) define a UF (readonly)
+  const ufField = container.querySelector("#uf");
+  const cidadeCombo = comboText(CITIES, e.cidade || "", {
+    placeholder: "Cidade", getLabel: x => Array.isArray(x) ? x[0] : x, getSub: x => Array.isArray(x) ? x[1] : "",
+    onPick: x => { if (Array.isArray(x)) ufField.value = x[1]; },
+    onCreate: txt => cadastrarCidade(txt, (nm, uf) => { cidadeCombo._input.value = nm; ufField.value = uf; CITIES.push([nm, uf]); }),
+    createLabel: t => `Cadastrar "${t}" (informar UF)`,
+  });
+  container.querySelector("#c_cidade").appendChild(cidadeCombo);
+  const cep = container.querySelector("#cep"); bindMask(cep, mCEP);
+  cep.addEventListener("change", () => cepLookup(cep.value, { endereco: container.querySelector("#end"), bairro: container.querySelector("#bairro"), cidade: cidadeCombo._input, uf: ufField }));
+  // termo de garantia: contador + pré-visualização markdown
+  const garantia = container.querySelector("#garantia"), gprev = container.querySelector("#gprev"), gpreview = container.querySelector("#gpreview"), gcount = container.querySelector("#gcount");
+  const atualizaContador = () => gcount.textContent = `${garantia.value.length} / 15000`;
+  garantia.addEventListener("input", atualizaContador); atualizaContador();
+  let preview = false;
+  gprev.onclick = () => {
+    preview = !preview;
+    gpreview.style.display = preview ? "" : "none";
+    garantia.style.display = preview ? "none" : "";
+    if (preview) gpreview.innerHTML = garantia.value.trim() ? mdToHtml(garantia.value) : '<span class="muted">Nada para pré-visualizar.</span>';
+    gprev.querySelector("span").textContent = preview ? "Editar" : "Pré-visualizar";
+  };
   container.querySelector("#sv").onclick = async () => {
     const payload = { razao_social: val("#razao"), nome_fantasia: val("#fant"), cnpj: val("#cnpj"), ie: val("#ie"), slogan: val("#slogan"),
       telefone: val("#tel"), whatsapp: val("#wpp"), email: val("#email"), site: val("#site"),
-      endereco: val("#end"), bairro: val("#bairro"), cidade: val("#cid"), uf: val("#uf"), cep: val("#cep"), termos_padrao: val("#termos") };
-    await api("save_empresa", payload); B.empresa = payload; toast("Dados salvos", "ok");
+      endereco: val("#end"), bairro: val("#bairro"), cidade: cidadeCombo._value(), uf: ufField.value.trim(), cep: val("#cep"),
+      termos_padrao: val("#termos"), termo_garantia: garantia.value };
+    if (!payload.razao_social) { toast("Razão Social é obrigatória", "err"); return; }
+    await api("save_empresa", payload); B.empresa = Object.assign({}, B.empresa, payload); toast("Dados salvos", "ok");
   };
   container.querySelector("#logo").onclick = async () => {
     const r = await api("escolher_logo");
-    if (r && r.has_logo) { const l = await api("get_logo_uri"); const p = container.querySelector("#logo-prev"); p.classList.remove("empty"); p.innerHTML = `<img src="${l.uri}">`; toast("Logo atualizado", "ok"); }
+    if (r && r.has_logo) { const l = await api("get_logo_uri"); const p = container.querySelector("#logo-prev"); p.classList.remove("empty"); p.innerHTML = `<img src="${l.uri}">`; container.querySelector("#logodel").style.display = ""; toast("Logo atualizado", "ok"); }
+  };
+  container.querySelector("#logodel").onclick = async () => {
+    if (!await confirma("Remover o logotipo da empresa?", { danger: true, ok: "Remover" })) return;
+    await api("remover_logo");
+    const p = container.querySelector("#logo-prev"); p.classList.add("empty"); p.innerHTML = "Sem logo";
+    container.querySelector("#logodel").style.display = "none"; toast("Logo removido", "ok");
   };
 }
 
@@ -1003,7 +1087,10 @@ function renderBackup(container) {
 
 /* ----------------------------------------------------------------- usuários (aba de Configurações) */
 async function renderUsuarios(container) {
-  const us = await api("list_usuarios");
+  const todos = await api("list_usuarios");
+  // SUPORTE é exclusivo da equipe de manutenção: oculto para usuários comuns
+  const souSup = CURRENT_USER && CURRENT_USER.is_suporte;
+  const us = souSup ? todos : todos.filter(u => !u.is_suporte);
   container.innerHTML = `<div class="between" style="margin-bottom:14px"><div class="muted small">${us.length} usuário(s) · login sempre em MAIÚSCULAS</div>
       <button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Usuário</span></button></div>
     <div id="ulista"></div>`;
@@ -1037,7 +1124,7 @@ async function delUsuario(u) {
     await api("delete_usuario", u.id); toast("Usuário excluído", "ok"); viewConfiguracoes("usuarios");
   }
 }
-function formUsuario(u) {
+function formUsuario(u, opts) {
   u = u || { ativo: 1 };
   let avatarB64 = null, avatarRemover = false;  // estado do avatar escolhido nesta edição
   const m = h(`<div class="modal" style="width:480px"><button class="close">×</button><h3>${u.id ? "Editar" : "Novo"} Usuário</h3>
@@ -1072,7 +1159,8 @@ function formUsuario(u) {
     if (!u.id && senha.length < 4) { toast("A senha deve ter ao menos 4 caracteres", "err"); return; }
     const saved = await api("save_usuario", payload);
     if (CURRENT_USER && saved && saved.id === CURRENT_USER.id) { CURRENT_USER.nome = saved.nome; CURRENT_USER.login = saved.login; CURRENT_USER.avatar_uri = saved.avatar_uri; mountUserChip(); }
-    toast("Usuário salvo", "ok"); bg.remove(); viewConfiguracoes("usuarios");
+    toast("Usuário salvo", "ok"); bg.remove();
+    if (opts && opts.onSaved) opts.onSaved(saved); else viewConfiguracoes("usuarios");
   };
 }
 /* redefinir senha de outro usuário (valida com a senha do solicitante; alvo troca no 1º login) */
@@ -1094,8 +1182,7 @@ function redefinirSenha(alvo) {
       const info = h(`<div class="modal" style="width:460px"><h3>Senha redefinida</h3>
         <p class="muted" style="margin:0">A senha de <b>${esc(r.data.login)}</b> foi redefinida para a senha padrão:</p>
         <div class="pass-box">${esc(r.data.senha_padrao)}</div>
-        <p class="muted" style="margin:0 0 4px">Este usuário deverá <b>obrigatoriamente</b> alterá-la ao fazer o próximo login.</p>
-        <p class="muted small" style="margin:0">Lembrete: o acesso <b>SUPORTE</b> permanece como administrador mestre do sistema.</p>
+        <p class="muted" style="margin:0">Este usuário deverá <b>obrigatoriamente</b> alterá-la ao fazer o próximo login.</p>
         <div class="between mt"><span></span><button class="btn btn-primary" id="ok2">Entendi</button></div></div>`);
       const bg2 = openModal(info);
       info.querySelector("#ok2").onclick = () => { bg2.remove(); viewConfiguracoes("usuarios"); };
@@ -1134,19 +1221,20 @@ function trocaSenhaObrigatoria(user) {
 }
 
 /* ----------------------------------------------------------------- login / sessão */
-function showLogin() {
+function showLogin(opts) {
+  opts = opts || {};
   return new Promise(resolve => {
     const ov = h(`<div class="login-ov"><div class="login-card">
       <div class="login-logo">${ic("wrench", 30)}</div>
-      <h2>ClickOS</h2><p class="login-sub">Entre para continuar</p>
-      <div class="field"><label>Usuário</label><input id="lg_user" autocomplete="off" placeholder="Login"></div>
+      <h2>ClickOS</h2><p class="login-sub">${esc(opts.hint || "Entre para continuar")}</p>
+      <div class="field"><label>Usuário</label><input id="lg_user" autocomplete="off" placeholder="Login" value="${esc(opts.prefillUser || "")}"></div>
       <div class="field"><label>Senha</label><input id="lg_pass" type="password" placeholder="Senha"></div>
       <button class="btn btn-primary" id="lg_btn">${ic("lock", 16)}<span>Entrar</span></button>
       <div class="login-err" id="lg_err"></div></div></div>`);
     document.body.appendChild(ov); injectIcons(ov);
     const user = ov.querySelector("#lg_user"), pass = ov.querySelector("#lg_pass"), err = ov.querySelector("#lg_err"), bt = ov.querySelector("#lg_btn");
     user.addEventListener("input", () => { const p = user.selectionStart; user.value = user.value.toUpperCase(); user.setSelectionRange(p, p); });
-    setTimeout(() => user.focus(), 30);
+    setTimeout(() => (opts.prefillUser ? pass : user).focus(), 30);
     const doLogin = async () => {
       err.textContent = ""; bt.disabled = true;
       try {
@@ -1163,6 +1251,116 @@ function showLogin() {
     pass.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doLogin(); } });
   });
 }
+/* assistente de primeira execução (configurações mínimas) */
+function showWizard() {
+  return new Promise(async (resolve) => {
+    let emp;
+    try { emp = await api("get_empresa"); } catch (e) { emp = {}; }
+    let users = []; try { users = await api("list_usuarios"); } catch (e) {}
+    const STEPS = ["Seu acesso", "Empresa", "Usuários"];
+    let step = 0, meuUsuario = null;
+    const ov = h(`<div class="wizard-ov"><div class="wizard-card">
+      <div class="wiz-head"><div class="wiz-logo">${ic("wrench", 26)}</div>
+        <div><div class="wiz-title">Bem-vindo ao ClickOS</div><div class="wiz-sub" id="wsub"></div></div></div>
+      <div class="wiz-steps" id="wsteps"></div>
+      <div class="wiz-body" id="wbody"></div>
+      <div class="wiz-foot"><button class="btn" id="wback">Voltar</button>
+        <button class="wiz-skip" id="wskip">Pular configuração</button>
+        <span class="spacer"></span><button class="btn btn-primary" id="wnext"></button></div>
+    </div></div>`);
+    document.body.appendChild(ov); injectIcons(ov);
+    const body = ov.querySelector("#wbody"), wsub = ov.querySelector("#wsub"), wsteps = ov.querySelector("#wsteps");
+    const back = ov.querySelector("#wback"), next = ov.querySelector("#wnext");
+    const werr = () => body.querySelector("#werr");
+
+    function renderBody() {
+      wsteps.innerHTML = STEPS.map((s, i) => `<span class="wiz-pill ${i === step ? "on" : i < step ? "done" : ""}">${i + 1}. ${esc(s)}</span>`).join("");
+      back.style.visibility = step === 0 ? "hidden" : "";
+      next.textContent = step === STEPS.length - 1 ? "Concluir" : "Próximo";
+      wsub.textContent = `Passo ${step + 1} de ${STEPS.length}`;
+      if (step === 0) {
+        body.innerHTML = `<p class="muted">O usuário <b>SUPORTE</b> é exclusivo da equipe de manutenção do ClickOS. Crie agora o <b>seu próprio acesso</b> para usar o sistema no dia a dia.</p>
+          <div class="grid2"><div class="field"><label>Seu nome *</label><input id="wnome" value="${esc(meuUsuario ? (meuUsuario.nome || "") : "")}"></div>
+            <div class="field"><label>Login * (MAIÚSCULAS)</label><input id="wlogin" value="${esc(meuUsuario ? (meuUsuario.login || "") : "")}" autocomplete="off"></div></div>
+          <div class="grid2"><div class="field"><label>Senha *${meuUsuario ? " (em branco mantém)" : ""}</label><input id="wsenha" type="password" placeholder="Mínimo 4 caracteres"></div>
+            <div class="field"><label>Confirmar senha</label><input id="wsenha2" type="password"></div></div>
+          <div class="login-err" id="werr"></div>`;
+        const wl = body.querySelector("#wlogin");
+        wl.addEventListener("input", () => { const p = wl.selectionStart; wl.value = wl.value.toUpperCase(); wl.setSelectionRange(p, p); });
+      } else if (step === 1) {
+        body.innerHTML = `<p class="muted">Dados que aparecem nos documentos. Você pode completar o restante depois em Configurações → Empresa.</p>
+          <div class="field"><label>Razão Social *</label><input id="wrazao" value="${esc(emp.razao_social || "")}"></div>
+          <div class="grid2"><div class="field"><label>Nome Fantasia</label><input id="wfant" value="${esc(emp.nome_fantasia || "")}"></div>
+            <div class="field"><label>CNPJ</label><input id="wcnpj" value="${esc(emp.cnpj || "")}" placeholder="00.000.000/0000-00"></div></div>
+          <div class="grid2"><div class="field"><label>Telefone</label><input id="wtel" value="${esc(emp.telefone || "")}" placeholder="(00) 0000-0000"></div>
+            <div class="field"><label>WhatsApp</label><input id="wwpp" value="${esc(emp.whatsapp || "")}" placeholder="(00) 00000-0000"></div></div>
+          <div class="login-err" id="werr"></div>`;
+        bindMask(body.querySelector("#wcnpj"), mDoc); bindMask(body.querySelector("#wtel"), mFone); bindMask(body.querySelector("#wwpp"), mFone);
+      } else {
+        const comuns = users.filter(u => !u.is_suporte);  // SUPORTE não é exibido (uso interno)
+        body.innerHTML = `<p class="muted">Cadastre os demais usuários que vão acessar o sistema (opcional). Você pode gerenciá-los depois em Configurações → Usuários.</p>
+          <div id="wulist"></div>
+          <button class="btn btn-sm mt" id="wadd">${ic("plus", 15)}<span>Adicionar usuário</span></button>`;
+        injectIcons(body);
+        const ul = body.querySelector("#wulist");
+        ul.innerHTML = comuns.length
+          ? `<div class="list-rows">${comuns.map(u => `<div class="list-row"><div class="avatar blue">${ic("user", 18)}</div><div class="grow"><div style="font-weight:700">${esc(u.nome || u.login)}</div><div class="small muted">Login: ${esc(u.login)}</div></div></div>`).join("")}</div>`
+          : `<div class="muted small">Nenhum usuário além do seu acesso ainda.</div>`;
+        injectIcons(ul);
+        body.querySelector("#wadd").onclick = () => formUsuario(null, { onSaved: async () => { try { users = await api("list_usuarios"); } catch (e) {} renderBody(); } });
+      }
+    }
+    async function concluir() {
+      next.disabled = true;
+      try { await api("concluir_setup"); } catch (e) {}
+      if (B.empresa) B.empresa.setup_concluido = 1;
+      ov.remove();
+      if (meuUsuario) {
+        // induz o uso da conta própria: encerra a sessão SUPORTE e pede login com o novo acesso
+        try { await window.pywebview.api.logout(); } catch (e) {}
+        CURRENT_USER = null;
+        const ub = document.getElementById("user-box"); if (ub) ub.style.display = "none";
+        main().innerHTML = "";
+        CURRENT_USER = await showLogin({ prefillUser: meuUsuario.login, hint: "Tudo pronto! Entre com o seu novo acesso." });
+        mountUserChip();
+      }
+      resolve();
+    }
+    back.onclick = () => { if (step > 0) { step--; renderBody(); } };
+    ov.querySelector("#wskip").onclick = () => concluir();
+    next.onclick = async () => {
+      if (step === 0) {
+        const nome = body.querySelector("#wnome").value.trim();
+        const login = body.querySelector("#wlogin").value.trim().toUpperCase();
+        const senha = body.querySelector("#wsenha").value, senha2 = body.querySelector("#wsenha2").value;
+        if (!login) { werr().textContent = "Informe um login para o seu acesso."; return; }
+        if (login === "SUPORTE") { werr().textContent = "SUPORTE é reservado. Escolha outro login."; return; }
+        const precisaSenha = !meuUsuario || senha || senha2;
+        if (precisaSenha) {
+          if (senha.length < 4) { werr().textContent = "A senha deve ter ao menos 4 caracteres."; return; }
+          if (senha !== senha2) { werr().textContent = "As senhas não conferem."; return; }
+        }
+        try {
+          const payload = meuUsuario ? { id: meuUsuario.id, nome, login, ativo: 1 } : { nome, login, senha, ativo: 1 };
+          if (meuUsuario && senha) payload.senha = senha;
+          meuUsuario = await api("save_usuario", payload);
+        } catch (e) { werr().textContent = "Não foi possível criar o usuário (o login já existe?)."; return; }
+        step = 1; renderBody(); return;
+      }
+      if (step === 1) {
+        const razao = body.querySelector("#wrazao").value.trim();
+        if (!razao) { werr().textContent = "Informe a Razão Social."; return; }
+        Object.assign(emp, { razao_social: razao, nome_fantasia: body.querySelector("#wfant").value.trim(),
+          cnpj: body.querySelector("#wcnpj").value.trim(), telefone: body.querySelector("#wtel").value.trim(), whatsapp: body.querySelector("#wwpp").value.trim() });
+        try { await api("save_empresa", emp); B.empresa = Object.assign({}, B.empresa, emp); }
+        catch (e) { werr().textContent = "Não foi possível salvar os dados."; return; }
+        step = 2; renderBody(); return;
+      }
+      concluir();
+    };
+    renderBody();
+  });
+}
 function mountUserChip() {
   const box = document.getElementById("user-box"); if (!box) return;
   box.style.display = "flex";
@@ -1172,7 +1370,7 @@ function mountUserChip() {
   document.getElementById("btn-logout").onclick = logout;
 }
 async function logout() {
-  if (!await confirma("Deseja sair da sua conta?", { ok: "Sair" })) return;
+  if (!await confirma("Deseja sair do app agora?", { ok: "Sair" })) return;
   try { await window.pywebview.api.logout(); } catch (e) {}  // limpa a sessão no servidor
   CURRENT_USER = null;
   document.getElementById("app").style.display = "none";
@@ -1208,6 +1406,7 @@ async function start() {
   app.style.display = "flex";
   bindNav();
   mountUserChip();
+  if (B.empresa && !B.empresa.setup_concluido) { try { await showWizard(); } catch (e) {} }  // primeira execução
   setView("dashboard");
   window.__p = "done";
 }

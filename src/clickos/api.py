@@ -258,12 +258,28 @@ class Api:
 
     @_api
     def save_empresa(self, payload):
+        if len(payload.get("termo_garantia") or "") > 15000:
+            raise ValueError("O termo de garantia excede o limite de 15.000 caracteres.")
         campos = ["razao_social", "nome_fantasia", "cnpj", "ie", "endereco", "bairro", "cidade",
-                  "uf", "cep", "telefone", "whatsapp", "email", "site", "slogan", "termos_padrao"]
+                  "uf", "cep", "telefone", "whatsapp", "email", "site", "slogan", "termos_padrao",
+                  "termo_garantia"]
         sets = ",".join(f"{c}=?" for c in campos)
         self.con.execute(f"UPDATE empresa SET {sets} WHERE id=1", [payload.get(c) for c in campos])
         self.con.commit()
         return self._empresa_sem_logo()
+
+    @_api
+    def remover_logo(self):
+        self.con.execute("UPDATE empresa SET logo=NULL WHERE id=1")
+        self.con.commit()
+        return {"has_logo": False}
+
+    @_api
+    def concluir_setup(self):
+        """Marca o assistente de primeira execução como concluído."""
+        self.con.execute("UPDATE empresa SET setup_concluido=1 WHERE id=1")
+        self.con.commit()
+        return True
 
     @_api
     def escolher_logo(self):

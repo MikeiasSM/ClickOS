@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS empresa (
   razao_social TEXT, nome_fantasia TEXT, cnpj TEXT, ie TEXT,
   endereco TEXT, bairro TEXT, cidade TEXT, uf TEXT, cep TEXT,
   telefone TEXT, whatsapp TEXT, email TEXT, site TEXT, slogan TEXT,
-  logo BLOB, termos_padrao TEXT
+  logo BLOB, termos_padrao TEXT, termo_garantia TEXT,
+  setup_concluido INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS contadores (
@@ -168,6 +169,11 @@ def _migrate(con: sqlite3.Connection) -> None:
         _add_column(con, "usuarios", "avatar", "BLOB")
         _add_column(con, "usuarios", "must_change", "INTEGER NOT NULL DEFAULT 0")
         con.execute("UPDATE meta SET schema_version = 4")
+    if ver < 5:
+        _add_column(con, "empresa", "termo_garantia", "TEXT")
+        _add_column(con, "empresa", "setup_concluido", "INTEGER NOT NULL DEFAULT 0")
+        con.execute("UPDATE empresa SET setup_concluido = 1")  # instalações existentes não veem o wizard
+        con.execute("UPDATE meta SET schema_version = 5")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)
