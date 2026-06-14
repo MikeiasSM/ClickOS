@@ -8,11 +8,14 @@ def test_connect_creates_schema(tmp_path):
             "documento_itens", "documento_lataria", "contadores", "meta"} <= names
 
 
-def test_seed_empresa_alves(tmp_path):
+def test_seed_empresa_vazia(tmp_path):
+    # o app é agnóstico/anêmico: a empresa nasce vazia (id=1), sem dados de exemplo, e o
+    # assistente de primeira execução ainda não foi concluído.
     con = db.connect(tmp_path / "t.db")
-    row = con.execute("SELECT cnpj, razao_social FROM empresa WHERE id=1").fetchone()
-    assert row["cnpj"] == "51.858.310/0001-82"
-    assert "ALVES" in row["razao_social"]
+    row = con.execute("SELECT razao_social, cnpj, logo, setup_concluido FROM empresa WHERE id=1").fetchone()
+    assert row is not None
+    assert row["razao_social"] is None and row["cnpj"] is None and row["logo"] is None
+    assert row["setup_concluido"] == 0
 
 
 def test_seed_catalogo(tmp_path):

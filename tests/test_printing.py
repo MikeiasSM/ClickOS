@@ -21,4 +21,4 @@ def test_render_documento_contains_key_fields(tmp_path):
     assert "Vlr Líquido" in html
     assert "@page" in html
     assert "ORÇAMENTO" in html
-    assert "data:image/png;base64," in html  # logo embutido
+    assert "<b>LOGO</b>" in html  # empresa anêmica: sem logo, o cabeçalho mostra o placeholder

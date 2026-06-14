@@ -193,20 +193,9 @@ def _seed_usuarios(con: sqlite3.Connection) -> None:
 
 
 def _seed(con: sqlite3.Connection) -> None:
-    try:
-        logo = Path(paths.asset("assets", "logo.png")).read_bytes()
-    except Exception:
-        logo = b""
-    con.execute(
-        """INSERT INTO empresa(id, razao_social, nome_fantasia, cnpj, ie, endereco, bairro, cidade, uf, cep,
-            telefone, whatsapp, email, site, slogan, logo, termos_padrao)
-           VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        ("ALVES - Chapeação e Pintura", "ALVES Chapeação e Pintura", "51.858.310/0001-82", "209.913.600",
-         "Top Park, Rua A, Av. Proncial", "Top Park", "Luís Eduardo Magalhães", "BA", "47.850-000",
-         "(77) 99154-3326", "(77) 99851-3755", "", "",
-         "QUALIDADE POR VOCÊ VÊ, CUIDADO POR VOCÊ CONFIA!", logo,
-         "Garantia dos serviços conforme acordado. Orçamento válido por 15 dias."),
-    )
+    # O app é agnóstico/anêmico quanto à empresa: cria apenas a linha vazia (id=1) — sem dados de
+    # exemplo. O lojista preenche os próprios dados no assistente de primeira execução.
+    con.execute("INSERT INTO empresa(id, setup_concluido) VALUES (1, 0)")
     con.executemany(
         "INSERT INTO itens_catalogo(nome, descricao, tipo, unidade, preco, ativo) VALUES (?,?,?,?,?,1)",
         CATALOGO_EXEMPLO,

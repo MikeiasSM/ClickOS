@@ -7,7 +7,11 @@ APP_NAME = "ClickOS"
 
 
 def data_dir() -> Path:
-    """Pasta gravável dos dados do usuário: %APPDATA%\\ClickOS (criada se não existir)."""
+    """Pasta gravável dos dados.
+    - Empacotado (exe): a MESMA pasta do executável — o app é portátil, o banco fica ao lado dele.
+    - Desenvolvimento: %APPDATA%\\ClickOS."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     base = os.environ.get("APPDATA") or str(Path.home())
     d = Path(base) / APP_NAME
     d.mkdir(parents=True, exist_ok=True)

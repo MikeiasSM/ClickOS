@@ -301,7 +301,7 @@ class _Usuarios:
         if not login:
             raise ValueError("Login é obrigatório.")
         if login == SUPORTE_LOGIN:
-            raise ValueError("O login SUPORTE é reservado.")
+            raise ValueError("Este login é reservado pelo sistema.")
         if len(senha) < 4:
             raise ValueError("A senha deve ter ao menos 4 caracteres.")
         if self.by_login(con, login):
@@ -323,7 +323,7 @@ class _Usuarios:
         # o login do SUPORTE é fixo (conta mestre); demais podem ser renomeados (sempre MAIÚSCULO)
         login = row["login"] if e_suporte else (_norm_login(data.get("login")) or row["login"])
         if not e_suporte and login == SUPORTE_LOGIN:
-            raise ValueError("O login SUPORTE é reservado.")
+            raise ValueError("Este login é reservado pelo sistema.")
         if con.execute("SELECT 1 FROM usuarios WHERE login=? COLLATE NOCASE AND id<>?",
                        (login, uid)).fetchone():
             raise ValueError("Já existe um usuário com esse login.")

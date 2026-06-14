@@ -61,6 +61,7 @@ function money(v) { return "R$ " + Number(num(v)).toLocaleString("pt-BR", { mini
 function fmtMoney(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtQtd(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
 function today() { return new Date().toISOString().slice(0, 10); }
+function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
 function btn(label, icon, onclick, cls) { const b = h(`<button class="btn btn-sm ${cls || ""}">${icon ? ic(icon, 15) : ""}${label ? `<span>${esc(label)}</span>` : ""}</button>`); b.onclick = onclick; return b; }
 
@@ -1140,8 +1141,12 @@ function formUsuario(u, opts) {
     <div class="field"><label>Situação</label><div id="c_ativo"></div></div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m);
-  const loginInput = m.querySelector("#login");
-  if (!u.is_suporte) loginInput.addEventListener("input", () => { const p = loginInput.selectionStart; loginInput.value = loginInput.value.toUpperCase(); loginInput.setSelectionRange(p, p); });
+  const loginInput = m.querySelector("#login"), nomeInput = m.querySelector("#nome");
+  let loginEditado = !!u.id;  // ao editar usuário existente não auto-replica o login
+  if (!u.is_suporte) {
+    loginInput.addEventListener("input", () => { loginEditado = true; const p = loginInput.selectionStart; loginInput.value = loginInput.value.toUpperCase(); loginInput.setSelectionRange(p, p); });
+    nomeInput.addEventListener("input", () => { if (!loginEditado) loginInput.value = loginFromNome(nomeInput.value); });  // replica nome no login (MAIÚSCULO, sem acento)
+  }
   const ativoCombo = selectCombo([{ value: "1", label: "Ativo" }, { value: "0", label: "Inativo" }], u.ativo ? "1" : "0", null);
   m.querySelector("#c_ativo").appendChild(ativoCombo);
   const ava = m.querySelector("#ava"), avdel = m.querySelector("#avdel");
@@ -1258,7 +1263,7 @@ function showWizard() {
     try { emp = await api("get_empresa"); } catch (e) { emp = {}; }
     let users = []; try { users = await api("list_usuarios"); } catch (e) {}
     const STEPS = ["Seu acesso", "Empresa", "Usuários"];
-    let step = 0, meuUsuario = null;
+    let step = 0, meuUsuario = null, meuSenha = "", loginEditado = false;
     const ov = h(`<div class="wizard-ov"><div class="wizard-card">
       <div class="wiz-head"><div class="wiz-logo">${ic("wrench", 26)}</div>
         <div><div class="wiz-title">Bem-vindo ao ClickOS</div><div class="wiz-sub" id="wsub"></div></div></div>
@@ -1279,17 +1284,19 @@ function showWizard() {
       next.textContent = step === STEPS.length - 1 ? "Concluir" : "Próximo";
       wsub.textContent = `Passo ${step + 1} de ${STEPS.length}`;
       if (step === 0) {
-        body.innerHTML = `<p class="muted">O usuário <b>SUPORTE</b> é exclusivo da equipe de manutenção do ClickOS. Crie agora o <b>seu próprio acesso</b> para usar o sistema no dia a dia.</p>
+        body.innerHTML = `<p class="muted">Crie o <b>seu acesso</b> para usar o sistema no dia a dia. Você administra tudo com a sua própria conta.</p>
           <div class="grid2"><div class="field"><label>Seu nome *</label><input id="wnome" value="${esc(meuUsuario ? (meuUsuario.nome || "") : "")}"></div>
             <div class="field"><label>Login * (MAIÚSCULAS)</label><input id="wlogin" value="${esc(meuUsuario ? (meuUsuario.login || "") : "")}" autocomplete="off"></div></div>
           <div class="grid2"><div class="field"><label>Senha *${meuUsuario ? " (em branco mantém)" : ""}</label><input id="wsenha" type="password" placeholder="Mínimo 4 caracteres"></div>
             <div class="field"><label>Confirmar senha</label><input id="wsenha2" type="password"></div></div>
           <div class="login-err" id="werr"></div>`;
-        const wl = body.querySelector("#wlogin");
-        wl.addEventListener("input", () => { const p = wl.selectionStart; wl.value = wl.value.toUpperCase(); wl.setSelectionRange(p, p); });
+        const wl = body.querySelector("#wlogin"), wn = body.querySelector("#wnome");
+        if (meuUsuario) loginEditado = true;  // já criado: não sobrescreve o login ao reeditar o nome
+        wl.addEventListener("input", () => { loginEditado = true; const p = wl.selectionStart; wl.value = wl.value.toUpperCase(); wl.setSelectionRange(p, p); });
+        wn.addEventListener("input", () => { if (!loginEditado) wl.value = loginFromNome(wn.value); });  // replica nome no login
       } else if (step === 1) {
-        body.innerHTML = `<p class="muted">Dados que aparecem nos documentos. Você pode completar o restante depois em Configurações → Empresa.</p>
-          <div class="field"><label>Razão Social *</label><input id="wrazao" value="${esc(emp.razao_social || "")}"></div>
+        body.innerHTML = `<p class="muted">Dados da sua empresa que aparecem nos documentos (opcional). Você pode completar o restante depois em Configurações → Empresa.</p>
+          <div class="field"><label>Razão Social</label><input id="wrazao" value="${esc(emp.razao_social || "")}"></div>
           <div class="grid2"><div class="field"><label>Nome Fantasia</label><input id="wfant" value="${esc(emp.nome_fantasia || "")}"></div>
             <div class="field"><label>CNPJ</label><input id="wcnpj" value="${esc(emp.cnpj || "")}" placeholder="00.000.000/0000-00"></div></div>
           <div class="grid2"><div class="field"><label>Telefone</label><input id="wtel" value="${esc(emp.telefone || "")}" placeholder="(00) 0000-0000"></div>
@@ -1315,14 +1322,13 @@ function showWizard() {
       try { await api("concluir_setup"); } catch (e) {}
       if (B.empresa) B.empresa.setup_concluido = 1;
       ov.remove();
-      if (meuUsuario) {
-        // induz o uso da conta própria: encerra a sessão SUPORTE e pede login com o novo acesso
-        try { await window.pywebview.api.logout(); } catch (e) {}
-        CURRENT_USER = null;
-        const ub = document.getElementById("user-box"); if (ub) ub.style.display = "none";
-        main().innerHTML = "";
-        CURRENT_USER = await showLogin({ prefillUser: meuUsuario.login, hint: "Tudo pronto! Entre com o seu novo acesso." });
-        mountUserChip();
+      if (meuUsuario && meuSenha) {
+        // login automático na conta recém-criada — sem exigir nova tela de login
+        try {
+          await window.pywebview.api.logout();
+          const r = await window.pywebview.api.login({ login: meuUsuario.login, senha: meuSenha });
+          if (r && r.ok !== false) CURRENT_USER = r.data;
+        } catch (e) {}
       }
       resolve();
     }
@@ -1334,7 +1340,6 @@ function showWizard() {
         const login = body.querySelector("#wlogin").value.trim().toUpperCase();
         const senha = body.querySelector("#wsenha").value, senha2 = body.querySelector("#wsenha2").value;
         if (!login) { werr().textContent = "Informe um login para o seu acesso."; return; }
-        if (login === "SUPORTE") { werr().textContent = "SUPORTE é reservado. Escolha outro login."; return; }
         const precisaSenha = !meuUsuario || senha || senha2;
         if (precisaSenha) {
           if (senha.length < 4) { werr().textContent = "A senha deve ter ao menos 4 caracteres."; return; }
@@ -1344,13 +1349,12 @@ function showWizard() {
           const payload = meuUsuario ? { id: meuUsuario.id, nome, login, ativo: 1 } : { nome, login, senha, ativo: 1 };
           if (meuUsuario && senha) payload.senha = senha;
           meuUsuario = await api("save_usuario", payload);
-        } catch (e) { werr().textContent = "Não foi possível criar o usuário (o login já existe?)."; return; }
+          if (senha) meuSenha = senha;  // guarda p/ login automático ao concluir
+        } catch (e) { werr().textContent = e.message || "Não foi possível criar o usuário."; return; }
         step = 1; renderBody(); return;
       }
       if (step === 1) {
-        const razao = body.querySelector("#wrazao").value.trim();
-        if (!razao) { werr().textContent = "Informe a Razão Social."; return; }
-        Object.assign(emp, { razao_social: razao, nome_fantasia: body.querySelector("#wfant").value.trim(),
+        Object.assign(emp, { razao_social: body.querySelector("#wrazao").value.trim(), nome_fantasia: body.querySelector("#wfant").value.trim(),
           cnpj: body.querySelector("#wcnpj").value.trim(), telefone: body.querySelector("#wtel").value.trim(), whatsapp: body.querySelector("#wwpp").value.trim() });
         try { await api("save_empresa", emp); B.empresa = Object.assign({}, B.empresa, emp); }
         catch (e) { werr().textContent = "Não foi possível salvar os dados."; return; }
@@ -1402,11 +1406,20 @@ async function start() {
   try { B = await api("bootstrap"); window.__p = "bootstrap-ok"; } catch (e) { window.__p = "bootstrap-err:" + e.message; }
   try { SUG = await api("sugestoes"); window.__p = "sug-ok"; } catch (e) { window.__p = "sug-err:" + e.message; }
   try { CITIES = await api("cidades"); } catch (e) { CITIES = []; }
-  CURRENT_USER = await showLogin();
+  const primeiraExec = !(B.empresa && B.empresa.setup_concluido);
+  if (primeiraExec) {
+    // 1ª execução: NÃO exige login. Abre uma sessão interna provisória só para o assistente rodar;
+    // ao concluir, o lojista é logado automaticamente na própria conta que acabou de criar.
+    let ok = false;
+    try { const r = await window.pywebview.api.login({ login: "SUPORTE", senha: "1234567890" }); if (r && r.ok !== false) { CURRENT_USER = r.data; ok = true; } } catch (e) {}
+    if (ok) { try { await showWizard(); } catch (e) {} }
+    else { CURRENT_USER = await showLogin(); }
+  } else {
+    CURRENT_USER = await showLogin();
+  }
   app.style.display = "flex";
   bindNav();
   mountUserChip();
-  if (B.empresa && !B.empresa.setup_concluido) { try { await showWizard(); } catch (e) {} }  // primeira execução
   setView("dashboard");
   window.__p = "done";
 }

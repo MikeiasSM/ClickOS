@@ -8,7 +8,8 @@ def _api(tmp_path):
 def test_bootstrap_and_flow(tmp_path):
     a = _api(tmp_path)
     boot = a.bootstrap()
-    assert boot["ok"] and "ALVES" in boot["data"]["empresa"]["razao_social"]
+    assert boot["ok"] and "empresa" in boot["data"]  # app agnóstico: empresa começa vazia
+    assert boot["data"]["empresa"]["setup_concluido"] == 0
     assert "logo" not in boot["data"]["empresa"]  # bytes não vão para o JS
 
     cli = a.save_cliente({"nome": "João da Silva", "telefone": "(77) 90000-0000"})
