@@ -78,8 +78,8 @@ function descLineHtml(doc) {
   const isPct = doc.desconto_tipo === "percent";
   return `<div class="tot-line"><span class="muted">Desconto geral</span>
     <span class="desc-wrap"><span class="muted small desc-eq" id="desc_eq"></span>
-      <input id="f_desc" class="money-in" style="width:120px;text-align:right" value="${doc.desconto_geral || 0}">
-      <span class="seg desc-seg"><button type="button" data-t="valor" class="${isPct ? "" : "on"}">R$</button><button type="button" data-t="percent" class="${isPct ? "on" : ""}">%</button></span></span></div>`;
+      <span class="seg desc-seg"><button type="button" data-t="valor" class="${isPct ? "" : "on"}">R$</button><button type="button" data-t="percent" class="${isPct ? "on" : ""}">%</button></span>
+      <input id="f_desc" class="money-in" style="width:120px;text-align:right" value="${doc.desconto_geral || 0}"></span></div>`;
 }
 /* Liga a alternância R$/% e o input #f_desc ao recalc. Devolve um getter do tipo atual. */
 function bindDescLine(recalc, tipoInicial) {
