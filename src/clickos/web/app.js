@@ -245,6 +245,21 @@ function barChart(data) {
     ${vazio ? '<div class="muted small" style="text-align:center;margin-top:-30px">Ainda sem faturamento registrado</div>' : ""}`;
   return wrap;
 }
+function donut(segments, opts) {
+  opts = opts || {};
+  const total = segments.reduce((a, s) => a + s.value, 0);
+  const size = opts.size || 160, sw = opts.stroke || 22, r = (size - sw) / 2, c = size / 2, C = 2 * Math.PI * r;
+  let off = 0, arcs = "";
+  segments.forEach(s => {
+    const len = total ? (s.value / total) * C : 0;
+    if (len > 0) arcs += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"></circle>`;
+    off += len;
+  });
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+    <g transform="rotate(-90 ${c} ${c})"><circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="${sw}"></circle>${arcs}</g>
+    <text x="${c}" y="${c - 1}" text-anchor="middle" font-size="26" font-weight="800" fill="#111827">${total}</text>
+    <text x="${c}" y="${c + 17}" text-anchor="middle" font-size="11" fill="#64748b">OS</text></svg>`;
+}
 function statusClass(s) {
   if (["Aberta", "Aberto"].includes(s)) return "b-aberta";
   if (["Em Execução"].includes(s)) return "b-os";
@@ -267,16 +282,15 @@ async function viewDashboard() {
     </div>
     <div class="dash-grid mt">
       <div class="card"><div class="between"><h3 style="margin:0">Faturamento (últimos 6 meses)</h3><span class="muted small">Ticket médio: ${money(d.ticket_medio)}</span></div><div id="chart" style="margin-top:12px"></div></div>
-      <div class="card"><h3 style="margin:0 0 14px">Pipeline de OS</h3><div id="pipe"></div></div>
+      <div class="card"><h3 style="margin:0 0 16px">Pipeline de OS</h3><div class="donut-wrap"><div id="donut"></div><div class="donut-legend" id="legend"></div></div></div>
     </div>
     <div class="card mt"><div class="between"><h3 style="margin:0">Documentos recentes</h3><button class="btn btn-sm" id="vt">Ver todos</button></div><div id="recent" style="margin-top:8px"></div></div>`);
   main().querySelector("#chart").appendChild(barChart(d.fat_meses || []));
-  const pipe = main().querySelector("#pipe");
   const cores = { "Aberta": "#f59e0b", "Em Execução": "#2563eb", "Concluída": "#16a34a" };
-  const vals = Object.values(d.pipeline || {}); const maxP = Math.max(1, ...vals);
-  Object.entries(d.pipeline || {}).forEach(([k, v]) => {
-    pipe.appendChild(h(`<div class="pipe-row"><div class="pipe-top"><span>${esc(k)}</span><b>${v}</b></div><div class="pipe-bar"><span style="width:${Math.round(v / maxP * 100)}%;background:${cores[k] || "#94a3b8"}"></span></div></div>`));
-  });
+  const segs = Object.entries(d.pipeline || {}).map(([k, v]) => ({ label: k, value: v, color: cores[k] || "#94a3b8" }));
+  main().querySelector("#donut").innerHTML = donut(segs, { size: 150, stroke: 24 });
+  const legend = main().querySelector("#legend");
+  segs.forEach(s => legend.appendChild(h(`<div class="leg-row"><span class="leg-dot" style="background:${s.color}"></span><span class="leg-label">${esc(s.label)}</span><b>${s.value}</b></div>`)));
   const rec = main().querySelector("#recent");
   if (!d.recentes.length) rec.appendChild(emptyState("file", "Nenhum documento ainda", "Comece criando um orçamento ou ordem de serviço.", "Novo Documento", () => openDocForm()));
   else renderDocsList(rec, d.recentes);
