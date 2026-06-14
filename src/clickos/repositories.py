@@ -404,9 +404,16 @@ def sugestoes(con):
             f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL AND TRIM({col})<>'' "
             f"ORDER BY {col} COLLATE NOCASE")]
 
-    def merge(seed, extra):
+    def custom(tipo):
+        return [r[0] for r in con.execute(
+            "SELECT valor FROM valores_custom WHERE tipo=? ORDER BY valor COLLATE NOCASE", (tipo,))]
+
+    def merge(seed, *extras):
         seen, out = set(), []
-        for v in list(seed) + list(extra):
+        combined = list(seed)
+        for e in extras:
+            combined += list(e)
+        for v in combined:
             k = (v or "").strip().lower()
             if v and k not in seen:
                 seen.add(k)
@@ -414,9 +421,9 @@ def sugestoes(con):
         return out
 
     return {
-        "marcas": merge(dbmod.SUG_MARCAS, distinct("veiculos", "marca")),
-        "cores": merge(dbmod.SUG_CORES, distinct("veiculos", "cor")),
-        "combustiveis": merge(dbmod.SUG_COMBUSTIVEIS, distinct("veiculos", "combustivel")),
+        "marcas": merge(dbmod.SUG_MARCAS, distinct("veiculos", "marca"), custom("marca")),
+        "cores": merge(dbmod.SUG_CORES, distinct("veiculos", "cor"), custom("cor")),
+        "combustiveis": merge(dbmod.SUG_COMBUSTIVEIS, distinct("veiculos", "combustivel"), custom("combustivel")),
         "cidades": merge(dbmod.SUG_CIDADES, distinct("clientes", "cidade")),
     }
 

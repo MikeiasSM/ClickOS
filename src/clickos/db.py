@@ -113,6 +113,10 @@ CREATE TABLE IF NOT EXISTS cidades_custom (
   nome TEXT NOT NULL, uf TEXT NOT NULL, UNIQUE(nome, uf)
 );
 
+CREATE TABLE IF NOT EXISTS valores_custom (
+  tipo TEXT NOT NULL, valor TEXT NOT NULL, UNIQUE(tipo, valor)
+);
+
 CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   login TEXT NOT NULL UNIQUE, nome TEXT, senha_hash TEXT, salt TEXT,

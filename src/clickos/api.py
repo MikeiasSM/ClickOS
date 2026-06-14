@@ -83,6 +83,19 @@ class Api:
         return {"nome": nome, "uf": uf}
 
     @_api
+    def add_valor(self, payload):
+        """Cadastra uma marca/cor/combustível personalizado (autocomplete persistente)."""
+        tipo = (payload.get("tipo") or "").strip().lower()
+        valor = (payload.get("valor") or "").strip()
+        if tipo not in ("marca", "cor", "combustivel"):
+            raise ValueError("Tipo inválido.")
+        if not valor:
+            raise ValueError("Informe o valor.")
+        self.con.execute("INSERT OR IGNORE INTO valores_custom(tipo, valor) VALUES (?, ?)", (tipo, valor))
+        self.con.commit()
+        return {"tipo": tipo, "valor": valor}
+
+    @_api
     def bootstrap(self):
         return {
             "empresa": self._empresa_sem_logo(),

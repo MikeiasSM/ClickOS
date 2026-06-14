@@ -301,23 +301,19 @@ function saudacao() { const hr = new Date().getHours(); return hr < 12 ? "Bom di
 function hojeExtenso() { try { const s = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); return s.charAt(0).toUpperCase() + s.slice(1); } catch (e) { return ""; } }
 function moneyK(v) { v = num(v); return v >= 1000 ? "R$ " + (v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : money(v); }
 function barChart(data) {
-  const W = 560, H = 190, pad = 26, n = data.length || 1;
+  // Gráfico em HTML/CSS com ALTURA FIXA (não escala com a largura da tela): as colunas
+  // preenchem a largura e as barras crescem dentro da altura do container.
   const max = Math.max(1, ...data.map(d => d.valor));
-  const gap = (W - pad * 2) / n, bw = gap * 0.55;
   const vazio = data.every(d => !d.valor);
-  let bars = "", labels = "";
-  data.forEach((d, i) => {
-    const bh = vazio ? 0 : (d.valor / max) * (H - pad * 2 - 14);
-    const x = pad + i * gap + (gap - bw) / 2, y = H - pad - bh;
-    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, bh).toFixed(1)}" rx="5" fill="url(#barg)"></rect>`;
-    if (d.valor) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" text-anchor="middle" font-size="10" fill="#475569">${moneyK(d.valor)}</text>`;
-    labels += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - pad + 16}" text-anchor="middle" font-size="11" fill="#64748b">${esc(d.label)}</text>`;
+  const wrap = h(`<div class="barchart"></div>`);
+  data.forEach(d => {
+    const hpct = vazio ? 0 : Math.max(2, Math.round((d.valor / max) * 100));
+    const col = h(`<div class="bc-col">
+      <div class="bc-plot"><div class="bc-val">${d.valor ? moneyK(d.valor) : ""}</div><div class="bc-bar" style="height:${hpct}%"></div></div>
+      <div class="bc-label">${esc(d.label)}</div></div>`);
+    wrap.appendChild(col);
   });
-  const wrap = h(`<div style="position:relative"></div>`);
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
-    <defs><linearGradient id="barg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs>
-    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e5e7eb"/>${bars}${labels}</svg>`;
-  if (vazio) wrap.appendChild(h('<div class="muted small" style="position:absolute;left:0;right:0;top:0;bottom:34px;display:flex;align-items:center;justify-content:center;pointer-events:none">Ainda sem faturamento registrado</div>'));
+  if (vazio) wrap.appendChild(h('<div class="bc-empty muted small">Ainda sem faturamento registrado</div>'));
   return wrap;
 }
 function donut(segments, opts) {
@@ -879,9 +875,14 @@ function formVeiculo(v, clientes, opts) {
   const bg = openModal(m);
   bindUpper(m.querySelector("#placa")); bindInt(m.querySelector("#ano")); bindInt(m.querySelector("#renavam")); bindInt(m.querySelector("#km"));
   m.querySelector("#chassi").addEventListener("input", e => e.target.value = e.target.value.toUpperCase());
-  const marcaC = comboText(SUG.marcas, v.marca || "", { placeholder: "Marca", getLabel: x => x }); m.querySelector("#c_marca").appendChild(marcaC);
-  const corC = comboText(SUG.cores, v.cor || "", { placeholder: "Cor", getLabel: x => x }); m.querySelector("#c_cor").appendChild(corC);
-  const combC = comboText(SUG.combustiveis, v.combustivel || "", { placeholder: "Combustível", getLabel: x => x }); m.querySelector("#c_comb").appendChild(combC);
+  const cadValor = (tipo, getCombo, listaKey, label) => async txt => {
+    try { await api("add_valor", { tipo, valor: txt }); } catch (e) { return; }
+    if (!SUG[listaKey].some(x => x.toLowerCase() === txt.toLowerCase())) SUG[listaKey].push(txt);
+    const c = getCombo(); c._setItems(SUG[listaKey]); c._input.value = txt; toast(label + ' cadastrado(a)', "ok");
+  };
+  const marcaC = comboText(SUG.marcas, v.marca || "", { placeholder: "Marca", getLabel: x => x, onCreate: cadValor("marca", () => marcaC, "marcas", "Marca"), createLabel: t => `Cadastrar marca "${t}"` }); m.querySelector("#c_marca").appendChild(marcaC);
+  const corC = comboText(SUG.cores, v.cor || "", { placeholder: "Cor", getLabel: x => x, onCreate: cadValor("cor", () => corC, "cores", "Cor"), createLabel: t => `Cadastrar cor "${t}"` }); m.querySelector("#c_cor").appendChild(corC);
+  const combC = comboText(SUG.combustiveis, v.combustivel || "", { placeholder: "Combustível", getLabel: x => x, onCreate: cadValor("combustivel", () => combC, "combustiveis", "Combustível"), createLabel: t => `Cadastrar "${t}"` }); m.querySelector("#c_comb").appendChild(combC);
   let propC = null;
   if (!lockOwner) {
     propC = comboSelect(clientes, v.cliente_id || null, { placeholder: "Buscar/selecionar pessoa...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || "",

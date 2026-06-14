@@ -239,6 +239,15 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .pipe-bar{height:9px;background:#f1f5f9;border-radius:999px;overflow:hidden}
 .pipe-bar span{display:block;height:100%;border-radius:999px;transition:width .3s}
 
+/* gráfico de barras (faturamento) — altura fixa, preenche a largura */
+.barchart{position:relative;display:flex;align-items:stretch;gap:6px;height:260px;margin-top:12px}
+.bc-col{flex:1;min-width:0;display:flex;flex-direction:column}
+.bc-plot{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+.bc-val{font-size:10px;color:#475569;white-space:nowrap}
+.bc-bar{width:62%;max-width:48px;border-radius:5px 5px 0 0;background:linear-gradient(180deg,#60a5fa,#2563eb);min-height:2px}
+.bc-label{text-align:center;font-size:11px;color:#64748b;padding-top:8px;margin-top:4px;border-top:1px solid var(--line)}
+.bc-empty{position:absolute;left:0;right:0;top:0;bottom:34px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+
 /* donut pipeline */
 .donut-wrap{display:flex;flex-direction:column;align-items:center;gap:18px}
 .donut-wrap svg{flex:none}
