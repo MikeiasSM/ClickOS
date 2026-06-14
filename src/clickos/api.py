@@ -251,10 +251,16 @@ class Api:
 
     @_api
     def converter_os(self, did):
+        orc = repo.documentos.get(self.con, did)  # estado do orçamento antes da conversão
         nova = services.convert_to_os(self.con, did, stamp=_stamp())
         self._audit("criar", "documento", nova["id"],
                     f"O.S. {nova['numero']} criada a partir de orçamento",
                     {"origem_orcamento_id": did, "snapshot": audit.snapshot(nova)})
+        # convert_to_os marca o orçamento de origem como Aprovado: audita também essa mudança
+        self._audit("status", "documento", did,
+                    f"{_doc_label(orc)} {(orc or {}).get('numero', did)}: status "
+                    f"{(orc or {}).get('status', '?')} → Aprovado",
+                    {"de": (orc or {}).get("status"), "para": "Aprovado"})
         return nova
 
     def _render(self, did, renderer):
