@@ -10,7 +10,7 @@ def run():
     api = Api(con)
     index = str(paths.asset("web", "index.html"))
     webview.create_window(
-        "ClickOS — Gestão de Ordens",
+        "ClickOS — Ordens de Serviço",
         url=index,
         js_api=api,
         width=1280,

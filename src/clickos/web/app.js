@@ -302,7 +302,7 @@ async function viewDashboard() {
 /* ----------------------------------------------------------------- documentos (kanban + lista) */
 async function viewDocumentos() {
   const mode = vmode("docs", "kanban");
-  render(`<div class="between"><div><h1 class="page-title">Ordens / Orçamentos</h1><p class="page-sub">Quadro de acompanhamento</p></div>
+  render(`<div class="between"><div><h1 class="page-title">Ordens de Serviço</h1><p class="page-sub">Quadro de acompanhamento</p></div>
     <div class="row"><span id="vt"></span><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Documento</span></button></div></div>
     <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, cliente ou placa..."></div></div>
     <div id="board" class="mt"></div>`);
@@ -354,7 +354,7 @@ function renderKanban(board, docs) {
 function kcard(d) {
   const prio = d.prioridade || "Normal";
   const card = h(`<div class="kcard pl-${esc(prio)}" draggable="true" data-id="${d.id}">
-    <div class="knum">${esc(d.numero)} ${d.tipo === "os" ? '<span class="badge b-os">OS</span>' : '<span class="badge b-orc">Orç</span>'}</div>
+    <div class="knum">${esc(d.numero)} ${d.tipo === "os" ? '<span class="badge b-os">OS</span>' : '<span class="badge b-orc">Orçamento</span>'}</div>
     <div class="kmeta">${esc(d.cliente_nome || "-")}<br>${esc(d.veiculo_placa || "-")} · ${fmtDate(d.data_abertura)}</div>
     <div class="kfoot"><span class="money">${money(d.total)}</span><span class="kmini">
       ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}
