@@ -6,11 +6,19 @@ from pathlib import Path
 
 import webview
 
+from . import audit
 from . import db as dbmod
 from . import paths
 from . import printing
 from . import repositories as repo
 from . import services
+
+
+def _doc_label(doc) -> str:
+    """Rótulo amigável do documento para mensagens de auditoria."""
+    if not doc:
+        return "Documento"
+    return "O.S." if doc.get("tipo") == "os" else "Orçamento"
 
 
 def _stamp() -> str:
@@ -41,6 +49,14 @@ class Api:
         if not self.usuario:
             raise ValueError("Sessão expirada. Faça login novamente.")
         return self.usuario
+
+    def _audit(self, acao, entidade=None, entidade_id=None, descricao="", detalhes=None, usuario=None):
+        """Registra um evento de auditoria sem nunca quebrar a ação principal (já efetivada)."""
+        try:
+            audit.registrar(self.con, usuario if usuario is not None else self.usuario,
+                            acao, entidade, entidade_id, descricao, detalhes)
+        except Exception:
+            pass
 
     def _win(self):
         # IMPORTANTE: não armazenar a janela como atributo de Api. O pywebview
@@ -80,6 +96,7 @@ class Api:
             raise ValueError("UF inválida.")
         self.con.execute("INSERT OR IGNORE INTO cidades_custom(nome, uf) VALUES (?, ?)", (nome, uf))
         self.con.commit()
+        self._audit("criar", "parametro", None, f"Cidade cadastrada: {nome}/{uf}", {"nome": nome, "uf": uf})
         return {"nome": nome, "uf": uf}
 
     @_api
@@ -93,6 +110,8 @@ class Api:
             raise ValueError("Informe o valor.")
         self.con.execute("INSERT OR IGNORE INTO valores_custom(tipo, valor) VALUES (?, ?)", (tipo, valor))
         self.con.commit()
+        self._audit("criar", "parametro", None, f"{tipo.capitalize()} cadastrada: {valor}",
+                    {"tipo": tipo, "valor": valor})
         return {"tipo": tipo, "valor": valor}
 
     @_api
@@ -112,6 +131,8 @@ class Api:
             "pecas": dbmod.LISTA_PECAS,
             "preferencias": repo.get_preferencias(self.con),
             "unidades_tempo": list(services.UNIDADES_SEG.keys()),
+            "audit_acoes": ["criar", "editar", "excluir", "status", "parametro",
+                            "login", "logout", "login_falha", "backup", "restaurar"],
         }
 
     @_api
@@ -120,7 +141,26 @@ class Api:
 
     @_api
     def save_preferencias(self, payload):
-        return repo.save_preferencias(self.con, payload or {})
+        antes = repo.get_preferencias(self.con)
+        saved = repo.save_preferencias(self.con, payload or {})
+        mudou = audit.diff(antes, saved)
+        if mudou:
+            self._audit("parametro", "preferencias", None, "Preferências do sistema alteradas", {"diff": mudou})
+        return saved
+
+    # ----------------------------------------------------------------- auditoria (somente leitura)
+    @_api
+    def list_auditoria(self, filtro=None):
+        self._sessao()  # exige usuário autenticado
+        f = filtro or {}
+        return {
+            "registros": repo.auditoria.list(
+                self.con, data_ini=f.get("data_ini") or None, data_fim=f.get("data_fim") or None,
+                usuario=f.get("usuario") or None, acao=f.get("acao") or None,
+                q=f.get("q") or None, limit=f.get("limit") or 500),
+            "usuarios": repo.auditoria.usuarios(self.con),
+            "total": repo.auditoria.total(self.con),
+        }
 
     @_api
     def dashboard(self):
@@ -179,22 +219,43 @@ class Api:
     @_api
     def save_documento(self, payload):
         if payload.get("id"):
-            return repo.documentos.update(self.con, payload["id"], payload, stamp=_stamp())
-        return repo.documentos.create(self.con, payload, stamp=_stamp())
+            antes = repo.documentos.get(self.con, payload["id"])
+            saved = repo.documentos.update(self.con, payload["id"], payload, stamp=_stamp())
+            self._audit("editar", "documento", saved["id"],
+                        f"{_doc_label(saved)} {saved['numero']} editado",
+                        {"diff": audit.diff(antes, saved)})
+            return saved
+        saved = repo.documentos.create(self.con, payload, stamp=_stamp())
+        self._audit("criar", "documento", saved["id"],
+                    f"{_doc_label(saved)} {saved['numero']} criado", {"snapshot": audit.snapshot(saved)})
+        return saved
 
     @_api
     def delete_documento(self, did):
+        antes = repo.documentos.get(self.con, did)
         repo.documentos.delete(self.con, did)
+        self._audit("excluir", "documento", did,
+                    f"{_doc_label(antes)} {(antes or {}).get('numero', did)} excluído",
+                    {"snapshot": audit.snapshot(antes)})
         return True
 
     @_api
     def set_status(self, payload):
+        antes = repo.documentos.get(self.con, payload["id"])
         repo.documentos.set_status(self.con, payload["id"], payload["status"], stamp=_stamp())
+        self._audit("status", "documento", payload["id"],
+                    f"{_doc_label(antes)} {(antes or {}).get('numero', payload['id'])}: status "
+                    f"{(antes or {}).get('status', '?')} → {payload['status']}",
+                    {"de": (antes or {}).get("status"), "para": payload["status"]})
         return True
 
     @_api
     def converter_os(self, did):
-        return services.convert_to_os(self.con, did, stamp=_stamp())
+        nova = services.convert_to_os(self.con, did, stamp=_stamp())
+        self._audit("criar", "documento", nova["id"],
+                    f"O.S. {nova['numero']} criada a partir de orçamento",
+                    {"origem_orcamento_id": did, "snapshot": audit.snapshot(nova)})
+        return nova
 
     def _render(self, did, renderer):
         doc = repo.documentos.get(self.con, did)
@@ -224,12 +285,22 @@ class Api:
     @_api
     def save_cliente(self, payload):
         if payload.get("id"):
-            return repo.clientes.update(self.con, payload["id"], payload, stamp=_stamp())
-        return repo.clientes.create(self.con, payload, stamp=_stamp())
+            antes = repo.clientes.get(self.con, payload["id"])
+            saved = repo.clientes.update(self.con, payload["id"], payload, stamp=_stamp())
+            self._audit("editar", "cliente", saved["id"], f"Pessoa {saved.get('nome', '')} editada",
+                        {"diff": audit.diff(antes, saved)})
+            return saved
+        saved = repo.clientes.create(self.con, payload, stamp=_stamp())
+        self._audit("criar", "cliente", saved["id"], f"Pessoa {saved.get('nome', '')} cadastrada",
+                    {"snapshot": audit.snapshot(saved)})
+        return saved
 
     @_api
     def delete_cliente(self, cid):
+        antes = repo.clientes.get(self.con, cid)
         repo.clientes.delete(self.con, cid)
+        self._audit("excluir", "cliente", cid, f"Pessoa {(antes or {}).get('nome', cid)} excluída",
+                    {"snapshot": audit.snapshot(antes)})
         return True
 
     # ----------------------------------------------------------------- veiculos
@@ -244,12 +315,22 @@ class Api:
     @_api
     def save_veiculo(self, payload):
         if payload.get("id"):
-            return repo.veiculos.update(self.con, payload["id"], payload, stamp=_stamp())
-        return repo.veiculos.create(self.con, payload, stamp=_stamp())
+            antes = repo.veiculos.get(self.con, payload["id"])
+            saved = repo.veiculos.update(self.con, payload["id"], payload, stamp=_stamp())
+            self._audit("editar", "veiculo", saved["id"], f"Veículo {saved.get('placa', '')} editado",
+                        {"diff": audit.diff(antes, saved)})
+            return saved
+        saved = repo.veiculos.create(self.con, payload, stamp=_stamp())
+        self._audit("criar", "veiculo", saved["id"], f"Veículo {saved.get('placa', '')} cadastrado",
+                    {"snapshot": audit.snapshot(saved)})
+        return saved
 
     @_api
     def delete_veiculo(self, vid):
+        antes = repo.veiculos.get(self.con, vid)
         repo.veiculos.delete(self.con, vid)
+        self._audit("excluir", "veiculo", vid, f"Veículo {(antes or {}).get('placa', vid)} excluído",
+                    {"snapshot": audit.snapshot(antes)})
         return True
 
     # ----------------------------------------------------------------- itens catálogo
@@ -260,12 +341,22 @@ class Api:
     @_api
     def save_item(self, payload):
         if payload.get("id"):
-            return repo.itens.update(self.con, payload["id"], payload)
-        return repo.itens.create(self.con, payload, stamp=_stamp())
+            antes = repo.itens.get(self.con, payload["id"])
+            saved = repo.itens.update(self.con, payload["id"], payload)
+            self._audit("editar", "item", saved["id"], f"Produto/Serviço {saved.get('nome', '')} editado",
+                        {"diff": audit.diff(antes, saved)})
+            return saved
+        saved = repo.itens.create(self.con, payload, stamp=_stamp())
+        self._audit("criar", "item", saved["id"], f"Produto/Serviço {saved.get('nome', '')} cadastrado",
+                    {"snapshot": audit.snapshot(saved)})
+        return saved
 
     @_api
     def delete_item(self, iid):
+        antes = repo.itens.get(self.con, iid)
         repo.itens.delete(self.con, iid)
+        self._audit("excluir", "item", iid, f"Produto/Serviço {(antes or {}).get('nome', iid)} excluído",
+                    {"snapshot": audit.snapshot(antes)})
         return True
 
     # ----------------------------------------------------------------- empresa
@@ -294,15 +385,21 @@ class Api:
         campos = ["razao_social", "nome_fantasia", "cnpj", "ie", "endereco", "bairro", "cidade",
                   "uf", "cep", "telefone", "whatsapp", "email", "site", "slogan", "termos_padrao",
                   "termo_garantia"]
+        antes = self._empresa_sem_logo()
         sets = ",".join(f"{c}=?" for c in campos)
         self.con.execute(f"UPDATE empresa SET {sets} WHERE id=1", [payload.get(c) for c in campos])
         self.con.commit()
-        return self._empresa_sem_logo()
+        depois = self._empresa_sem_logo()
+        mudou = audit.diff(antes, depois)
+        if mudou:
+            self._audit("editar", "empresa", 1, "Dados da empresa atualizados", {"diff": mudou})
+        return depois
 
     @_api
     def remover_logo(self):
         self.con.execute("UPDATE empresa SET logo=NULL WHERE id=1")
         self.con.commit()
+        self._audit("editar", "empresa", 1, "Logotipo da empresa removido")
         return {"has_logo": False}
 
     @_api
@@ -310,6 +407,7 @@ class Api:
         """Marca o assistente de primeira execução como concluído."""
         self.con.execute("UPDATE empresa SET setup_concluido=1 WHERE id=1")
         self.con.commit()
+        self._audit("parametro", "empresa", 1, "Configuração inicial concluída")
         return True
 
     @_api
@@ -323,20 +421,27 @@ class Api:
         path = res[0] if isinstance(res, (list, tuple)) else res
         self.con.execute("UPDATE empresa SET logo=? WHERE id=1", (Path(path).read_bytes(),))
         self.con.commit()
+        self._audit("editar", "empresa", 1, "Logotipo da empresa atualizado")
         return {"has_logo": True}
 
     # ----------------------------------------------------------------- usuários / login
     @_api
     def login(self, payload):
+        tentado = ((payload or {}).get("login") or "").strip().upper()
         user = repo.usuarios.autenticar(self.con, (payload or {}).get("login"), (payload or {}).get("senha"))
         if not user:
+            self._audit("login_falha", "usuario", None, f"Tentativa de login malsucedida: {tentado or '(vazio)'}",
+                        usuario={"id": None, "login": tentado or None})
             raise ValueError("Login ou senha inválidos.")
         # guarda a identidade no servidor (não confiar no cliente para autorização)
         self.usuario = {"id": user["id"], "login": user["login"], "is_suporte": user["is_suporte"]}
+        self._audit("login", "usuario", user["id"], f"Login de {user['login']}")
         return user
 
     @_api
     def logout(self):
+        if self.usuario:
+            self._audit("logout", "usuario", self.usuario.get("id"), f"Logout de {self.usuario.get('login')}")
         self.usuario = None
         return True
 
@@ -352,13 +457,24 @@ class Api:
             alvo = repo.usuarios.get(self.con, payload["id"])
             if alvo and alvo.get("is_suporte") and not sess.get("is_suporte"):
                 raise ValueError("Apenas o SUPORTE pode editar a conta SUPORTE.")
-            return repo.usuarios.update(self.con, payload["id"], payload, stamp=_stamp())
-        return repo.usuarios.create(self.con, payload, stamp=_stamp())
+            saved = repo.usuarios.update(self.con, payload["id"], payload, stamp=_stamp())
+            det = {"diff": audit.diff(alvo, saved)}
+            if (payload.get("senha") or "").strip():
+                det["senha_alterada"] = True
+            self._audit("editar", "usuario", saved["id"], f"Usuário {saved.get('login', '')} editado", det)
+            return saved
+        saved = repo.usuarios.create(self.con, payload, stamp=_stamp())
+        self._audit("criar", "usuario", saved["id"], f"Usuário {saved.get('login', '')} criado",
+                    {"snapshot": audit.snapshot(saved)})
+        return saved
 
     @_api
     def delete_usuario(self, uid):
         self._sessao()
+        alvo = repo.usuarios.get(self.con, uid)
         repo.usuarios.delete(self.con, uid)
+        self._audit("excluir", "usuario", uid, f"Usuário {(alvo or {}).get('login', uid)} excluído",
+                    {"snapshot": audit.snapshot(alvo)})
         return True
 
     @_api
@@ -374,7 +490,9 @@ class Api:
             raise ValueError("Usuário não encontrado.")
         if alvo.get("is_suporte") and not sess.get("is_suporte"):
             raise ValueError("Apenas o SUPORTE pode redefinir a senha do SUPORTE.")
-        return repo.usuarios.reset_senha(self.con, alvo_id, sess["id"], payload.get("senha") or "")
+        res = repo.usuarios.reset_senha(self.con, alvo_id, sess["id"], payload.get("senha") or "")
+        self._audit("parametro", "usuario", alvo_id, f"Senha redefinida para o usuário {alvo.get('login', '')}")
+        return res
 
     @_api
     def definir_senha(self, payload):
@@ -386,7 +504,9 @@ class Api:
         atual = repo.usuarios.by_login(self.con, sess["login"])
         if not atual or not atual["must_change"]:
             raise ValueError("Troca de senha não solicitada.")
-        return repo.usuarios.definir_senha(self.con, sess["id"], payload.get("nova_senha") or "")
+        saved = repo.usuarios.definir_senha(self.con, sess["id"], payload.get("nova_senha") or "")
+        self._audit("parametro", "usuario", sess["id"], f"Senha alterada pelo usuário {sess.get('login', '')}")
+        return saved
 
     @_api
     def pick_image(self):
@@ -414,6 +534,7 @@ class Api:
         dest = res if isinstance(res, str) else res[0]
         self.con.commit()
         shutil.copy2(str(dbmod.paths.db_path()), dest)
+        self._audit("backup", None, None, "Backup do banco gerado", {"arquivo": dest})
         return {"arquivo": dest}
 
     @_api
@@ -428,4 +549,6 @@ class Api:
         self.con.close()
         shutil.copy2(src, str(dbmod.paths.db_path()))
         self.con = dbmod.connect(dbmod.paths.db_path())
+        # registra no banco recém-restaurado que houve uma restauração (a auditoria anterior veio do backup)
+        self._audit("restaurar", None, None, "Banco restaurado a partir de backup", {"origem": str(src)})
         return {"restaurado": True}

@@ -1,4 +1,5 @@
 """Acesso a dados (CRUD) por entidade. Retorna dicts (prontos para o bridge JS)."""
+import json
 from datetime import datetime
 
 from . import db as dbmod
@@ -531,8 +532,50 @@ def sugestoes(con):
     }
 
 
+# --------------------------------------------------------------------------- auditoria (somente leitura)
+class _Auditoria:
+    """Consulta da trilha de auditoria. Não há create/update/delete — a tabela é append-only."""
+
+    def list(self, con, data_ini=None, data_fim=None, usuario=None, acao=None, q=None, limit=500):
+        sql = "SELECT * FROM audit_log WHERE 1=1"
+        args = []
+        if data_ini:
+            sql += " AND substr(criado_em,1,10) >= ?"; args.append(str(data_ini)[:10])
+        if data_fim:
+            sql += " AND substr(criado_em,1,10) <= ?"; args.append(str(data_fim)[:10])
+        if usuario:
+            sql += " AND usuario_login = ?"; args.append(usuario)
+        if acao:
+            sql += " AND acao = ?"; args.append(acao)
+        if q:
+            like = f"%{q}%"
+            sql += " AND (descricao LIKE ? OR entidade LIKE ? OR usuario_login LIKE ?)"
+            args += [like, like, like]
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(int(limit) if limit else 500)
+        rows = []
+        for r in con.execute(sql, args):
+            d = dict(r)
+            if d.get("detalhes"):
+                try:
+                    d["detalhes"] = json.loads(d["detalhes"])
+                except (TypeError, ValueError):
+                    pass
+            rows.append(d)
+        return rows
+
+    def usuarios(self, con):
+        return [r[0] for r in con.execute(
+            "SELECT DISTINCT usuario_login FROM audit_log "
+            "WHERE usuario_login IS NOT NULL AND TRIM(usuario_login)<>'' ORDER BY usuario_login COLLATE NOCASE")]
+
+    def total(self, con):
+        return con.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+
+
 clientes = _Clientes()
 veiculos = _Veiculos()
 itens = _Itens()
 documentos = _Documentos()
 usuarios = _Usuarios()
+auditoria = _Auditoria()

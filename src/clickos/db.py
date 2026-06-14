@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -123,6 +123,26 @@ CREATE TABLE IF NOT EXISTS preferencias (
   chave TEXT PRIMARY KEY, valor TEXT
 );
 
+-- Trilha de auditoria: SOMENTE INSERÇÃO. Os gatilhos abaixo abortam qualquer UPDATE/DELETE,
+-- inclusive via SQL direto — ninguém (nem o SUPORTE) pode alterar ou apagar registros de auditoria.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  criado_em TEXT NOT NULL,
+  usuario_id INTEGER,
+  usuario_login TEXT,
+  acao TEXT NOT NULL,
+  entidade TEXT,
+  entidade_id INTEGER,
+  descricao TEXT,
+  detalhes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_criado ON audit_log(criado_em);
+CREATE INDEX IF NOT EXISTS idx_audit_entidade ON audit_log(entidade, entidade_id);
+CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
+  BEGIN SELECT RAISE(ABORT, 'Registros de auditoria são somente leitura.'); END;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log
+  BEGIN SELECT RAISE(ABORT, 'Registros de auditoria não podem ser excluídos.'); END;
+
 CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   login TEXT NOT NULL UNIQUE, nome TEXT, senha_hash TEXT, salt TEXT,
@@ -195,6 +215,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         _add_column(con, "documentos", "desconto_tipo", "TEXT DEFAULT 'valor'")
         _add_column(con, "documentos", "previsao", "TEXT")
         con.execute("UPDATE meta SET schema_version = 8")
+    if ver < 9:
+        # audit_log + gatilhos já criados por executescript(DDL) acima (IF NOT EXISTS); só registra a versão.
+        con.execute("UPDATE meta SET schema_version = 9")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)

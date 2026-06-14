@@ -425,3 +425,11 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .pref-row>.muted{flex:0 0 auto;white-space:nowrap}
 .pref-preview{margin-top:10px;font-weight:600;color:var(--blue);background:#eff6ff;border:1px dashed #bfdbfe;
   border-radius:8px;padding:9px 12px;display:inline-block}
+
+/* auditoria */
+.audit-filtros{flex-wrap:wrap}
+.audit-filtros .fdates{flex-wrap:wrap}
+.audit-filtros .fdates select{width:auto;min-width:140px}
+.audit-note{display:flex;align-items:center;gap:7px;margin:10px 2px 12px}
+.audit-note .icon{flex:0 0 auto;opacity:.65}
+.audit-json{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;font-size:12px;margin:0;white-space:pre-wrap}

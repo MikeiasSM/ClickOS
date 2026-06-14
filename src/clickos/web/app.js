@@ -1366,6 +1366,7 @@ async function viewConfiguracoes(tab) {
       <button data-tab="preferencias">${ic("settings", 16)}<span>Preferências</span></button>
       <button data-tab="usuarios">${ic("shield", 16)}<span>Usuários</span></button>
       <button data-tab="backup">${ic("save", 16)}<span>Backup e Restauração</span></button>
+      <button data-tab="auditoria">${ic("list", 16)}<span>Auditoria</span></button>
     </div>
     <div id="cfgbody" class="mt"></div>`);
   const tabs = main().querySelector("#cfgtabs");
@@ -1375,7 +1376,91 @@ async function viewConfiguracoes(tab) {
   if (tab === "empresa") await renderEmpresa(body);
   else if (tab === "preferencias") await renderPreferencias(body);
   else if (tab === "usuarios") await renderUsuarios(body);
+  else if (tab === "auditoria") await renderAuditoria(body);
   else renderBackup(body);
+}
+
+/* ----------------------------------------------------------------- auditoria (aba de Configurações) */
+const AUDIT_ACOES = {
+  criar: { lbl: "Criação", cls: "b-green" }, editar: { lbl: "Edição", cls: "b-os" },
+  excluir: { lbl: "Exclusão", cls: "b-late" }, status: { lbl: "Status", cls: "b-aberta" },
+  parametro: { lbl: "Parâmetro", cls: "b-orc" }, login: { lbl: "Login", cls: "b-gray" },
+  logout: { lbl: "Logout", cls: "b-gray" }, login_falha: { lbl: "Login falho", cls: "b-late" },
+  backup: { lbl: "Backup", cls: "b-gray" }, restaurar: { lbl: "Restauração", cls: "b-late" },
+};
+const AUDIT_ENT = { cliente: "Pessoa", veiculo: "Veículo", item: "Produto/Serviço", documento: "Documento",
+  usuario: "Usuário", empresa: "Empresa", preferencias: "Preferências", parametro: "Parâmetro" };
+function fmtDateTime(s) { s = String(s || ""); return s.length >= 16 ? fmtDate(s.slice(0, 10)) + " " + s.slice(11, 16) : fmtDate(s); }
+function fmtAuditVal(v) { if (v === null || v === undefined || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v); }
+
+async function renderAuditoria(container) {
+  const r0 = monthRange();
+  const acoes = B.audit_acoes || Object.keys(AUDIT_ACOES);
+  container.innerHTML = `
+    <div class="card"><div class="filtros audit-filtros">
+      <div class="search">${ic("search", 16)}<input id="a_q" placeholder="Buscar na descrição, entidade ou usuário..."></div>
+      <div class="fdates">
+        <select id="a_user" class="pref-sel"><option value="">Todos os usuários</option></select>
+        <select id="a_acao" class="pref-sel"><option value="">Todas as ações</option>${acoes.map(a => `<option value="${a}">${(AUDIT_ACOES[a] || {}).lbl || a}</option>`).join("")}</select>
+        <label>De</label><input type="date" id="a_ini" value="${r0.ini}"><label>até</label><input type="date" id="a_fim" value="${r0.fim}">
+        <button class="btn btn-sm" id="a_clear">Limpar</button>
+      </div>
+    </div></div>
+    <div class="muted small audit-note">${ic("lock", 13)}<span>Somente leitura — registros de auditoria não podem ser alterados nem excluídos por ninguém. <b id="a_total"></b></span></div>
+    <div id="a_lista"></div>`;
+  injectIcons(container);
+  const $ = s => container.querySelector(s);
+  const filtros = () => ({ q: $("#a_q").value.trim(), data_ini: $("#a_ini").value, data_fim: $("#a_fim").value, usuario: $("#a_user").value, acao: $("#a_acao").value });
+  let usuariosOk = false;
+  async function reload() {
+    const res = await api("list_auditoria", filtros());
+    if (!usuariosOk) { (res.usuarios || []).forEach(u => $("#a_user").appendChild(h(`<option value="${esc(u)}">${esc(u)}</option>`))); usuariosOk = true; }
+    $("#a_total").textContent = `Total de eventos: ${res.total}.`;
+    const lst = $("#a_lista"); lst.innerHTML = "";
+    const regs = res.registros || [];
+    if (!regs.length) { lst.appendChild(emptyState("list", "Nenhum evento no período", "Ajuste os filtros para ver os registros de auditoria.")); return; }
+    const table = h(`<table class="grid-table"><thead><tr><th>Data / Hora</th><th>Usuário</th><th>Ação</th><th>Registro</th><th></th></tr></thead><tbody></tbody></table>`);
+    const tb = table.querySelector("tbody");
+    regs.forEach(rg => {
+      const meta = AUDIT_ACOES[rg.acao] || { lbl: rg.acao, cls: "b-gray" };
+      const ent = AUDIT_ENT[rg.entidade] || rg.entidade || "";
+      const tr = h(`<tr>
+        <td class="mono" style="white-space:nowrap">${fmtDateTime(rg.criado_em)}</td>
+        <td>${esc(rg.usuario_login || "—")}</td>
+        <td><span class="badge ${meta.cls}">${esc(meta.lbl)}</span></td>
+        <td><div>${esc(rg.descricao || "")}</div>${ent ? `<div class="small muted">${esc(ent)}${rg.entidade_id ? " #" + rg.entidade_id : ""}</div>` : ""}</td>
+        <td class="r"></td></tr>`);
+      if (rg.detalhes) tr.querySelector("td.r").appendChild(btn("Detalhes", "eye", () => auditDetalhes(rg)));
+      tb.appendChild(tr);
+    });
+    const card = h(`<div class="card grid-card"></div>`); card.appendChild(table); lst.appendChild(card); injectIcons(lst);
+  }
+  $("#a_q").addEventListener("input", reload);
+  ["#a_ini", "#a_fim", "#a_user", "#a_acao"].forEach(s => $(s).addEventListener("change", reload));
+  $("#a_clear").onclick = () => { ["#a_q", "#a_ini", "#a_fim", "#a_user", "#a_acao"].forEach(s => $(s).value = ""); reload(); };
+  reload();
+}
+
+function auditDetalhes(rg) {
+  const d = rg.detalhes || {};
+  let body;
+  if (d.diff && Object.keys(d.diff).length) {
+    body = `<table class="grid-table"><thead><tr><th>Campo</th><th>Antes</th><th>Depois</th></tr></thead><tbody>${
+      Object.entries(d.diff).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td>${esc(fmtAuditVal(v[0]))}</td><td>${esc(fmtAuditVal(v[1]))}</td></tr>`).join("")}</tbody></table>`;
+  } else if (d.snapshot && Object.keys(d.snapshot).length) {
+    body = `<table class="grid-table"><thead><tr><th>Campo</th><th>Valor</th></tr></thead><tbody>${
+      Object.entries(d.snapshot).map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td>${esc(fmtAuditVal(v))}</td></tr>`).join("")}</tbody></table>`;
+  } else if (d.de !== undefined || d.para !== undefined) {
+    body = `<p style="font-size:15px">De <b>${esc(d.de || "—")}</b> &nbsp;→&nbsp; <b>${esc(d.para || "—")}</b></p>`;
+  } else {
+    body = `<pre class="audit-json">${esc(JSON.stringify(d, null, 2))}</pre>`;
+  }
+  const m = h(`<div class="modal" style="width:660px"><button class="close">×</button>
+    <h3>Detalhes do evento</h3>
+    <div class="small muted" style="margin:0 0 14px">${fmtDateTime(rg.criado_em)} · ${esc(rg.usuario_login || "—")} · ${esc(rg.descricao || "")}</div>
+    <div class="grid-card" style="max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:10px">${body}</div>
+    <div class="between mt"><span></span><button class="btn btn-primary" id="fch">Fechar</button></div></div>`);
+  const bg = openModal(m); m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#fch").onclick = () => bg.remove();
 }
 
 /* ----------------------------------------------------------------- preferências (aba de Configurações) */
