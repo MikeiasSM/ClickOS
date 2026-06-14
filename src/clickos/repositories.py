@@ -256,13 +256,20 @@ class _Documentos:
         itens = data.get("itens") or []
         if data.get("status") == "Faturada" and not itens:
             raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
-        tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
-                                      data.get("desconto_tipo"))
-        # só grava as colunas presentes no payload (preserva as demais — evita zerar campos não enviados)
+        # Campos financeiros ausentes no payload herdam o que já está gravado: assim o total nunca é
+        # recalculado com desconto/acréscimo zerados nem com o tipo de desconto errado (R$ vs %).
+        atual = con.execute("SELECT desconto_geral, desconto_tipo, acrescimo FROM documentos WHERE id=?",
+                            (did,)).fetchone()
+        dg = data["desconto_geral"] if "desconto_geral" in data else (atual["desconto_geral"] if atual else 0)
+        dt = data["desconto_tipo"] if "desconto_tipo" in data else (atual["desconto_tipo"] if atual else "valor")
+        ac = data["acrescimo"] if "acrescimo" in data else (atual["acrescimo"] if atual else 0)
+        tot = services.compute_totals(itens, dg, ac, dt)
+        # só grava as colunas presentes no payload (preserva as demais — evita zerar campos não enviados);
+        # os campos calculados entram sempre (a lista nunca fica vazia → sem vírgula solta no SET).
         campos = [f for f in self.HEAD if f in data]
-        sets = ",".join(f"{f}=?" for f in campos) + ",subtotal=?,total=?,atualizado_em=?"
+        partes = [f"{f}=?" for f in campos] + ["subtotal=?", "total=?", "atualizado_em=?"]
         vals = [data.get(f) for f in campos] + [tot["subtotal"], tot["total"], now, did]
-        con.execute(f"UPDATE documentos SET {sets} WHERE id=?", vals)
+        con.execute(f"UPDATE documentos SET {','.join(partes)} WHERE id=?", vals)
         if data.get("status") == "Faturada":
             fat = (data.get("faturado_em") or "").strip()
             if fat:  # data de faturamento editável (inclusive O.S. lançada já faturada)

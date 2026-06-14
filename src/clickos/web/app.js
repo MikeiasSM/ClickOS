@@ -61,7 +61,7 @@ function num(v) { if (typeof v === "number") return v; let s = String(v == null 
 function money(v) { return "R$ " + Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtMoney(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtQtd(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function today() { return new Date().toISOString().slice(0, 10); }
+function today() { return ymd(new Date()); }  // data LOCAL (coerente com monthRange e com o date-picker)
 function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
 function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -688,6 +688,8 @@ async function formOrcamento(id, opts) {
     usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
   }, opts.prefill || {});
   const itens = (doc.itens || []).map(i => ({ ...i }));
+  // novo orçamento: validade derivada da preferência atual; edição: preserva a validade já gravada
+  const valTxt = (id && doc.validade) ? doc.validade : validadeTexto();
   render(`
     <div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
       <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Orçamento ${doc.expirado ? '<span class="badge b-late" style="font-size:12px;vertical-align:middle">Expirado</span>' : ""}</h1><p class="page-sub" style="margin:0">Proposta comercial</p></div></div>
@@ -705,7 +707,7 @@ async function formOrcamento(id, opts) {
       <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
     <div class="card mt"><h3 class="sec-title">Condições</h3>
       <div class="grid2"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
-        <div class="field"><label>Validade</label><input id="f_val" readonly value="${esc(validadeTexto())}"><span class="hint muted small">Definida em Configurações → Preferências</span></div></div>
+        <div class="field"><label>Validade</label><input id="f_val" readonly value="${esc(valTxt)}"><span class="hint muted small">Definida em Configurações → Preferências</span></div></div>
       <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div></div>
     <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancel">Cancelar</button>
       <div class="row">${id && !["Aprovado", "Recusado", "Cancelado"].includes(doc.status) ? `<button class="btn" id="efetivar">${ic("repeat", 16)}<span>Efetivar (criar O.S.)</span></button>` : ""}
@@ -729,7 +731,7 @@ async function formOrcamento(id, opts) {
     usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
     cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null,
     desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")),
-    forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), validade: validadeTexto(), observacoes: val("#f_obs"),
+    forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), validade: valTxt, observacoes: val("#f_obs"),
     itens: itens.map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo, quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })), lataria: [] });
   main().querySelector("#back").onclick = () => setView("orcamentos");
   main().querySelector("#cancel").onclick = () => setView("orcamentos");
