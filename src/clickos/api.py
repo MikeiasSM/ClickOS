@@ -95,15 +95,40 @@ class Api:
     @_api
     def dashboard(self):
         con = self.con
-        total = con.execute("SELECT COUNT(*) FROM documentos").fetchone()[0]
-        abertas = con.execute("SELECT COUNT(*) FROM documentos WHERE status='Aberta'").fetchone()[0]
-        clientes = con.execute("SELECT COUNT(*) FROM clientes").fetchone()[0]
-        mes = datetime.now().strftime("%Y-%m")
-        fat = con.execute(
-            "SELECT COALESCE(SUM(total),0) FROM documentos WHERE tipo='os' AND substr(data_abertura,1,7)=?",
-            (mes,)).fetchone()[0]
-        return {"total": total, "abertas": abertas, "clientes": clientes,
-                "faturamento_mes": fat, "recentes": repo.documentos.list(con)[:5]}
+        one = lambda q, a=(): con.execute(q, a).fetchone()[0]
+        agora = datetime.now()
+        mes = agora.strftime("%Y-%m")
+        total = one("SELECT COUNT(*) FROM documentos")
+        orcamentos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento'")
+        os_count = one("SELECT COUNT(*) FROM documentos WHERE tipo='os'")
+        abertas = one("SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status='Aberta'")
+        orc_abertos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status='Aberto'")
+        clientes = one("SELECT COUNT(*) FROM clientes")
+        veiculos = one("SELECT COUNT(*) FROM veiculos")
+        fat_mes = one("SELECT COALESCE(SUM(total),0) FROM documentos WHERE tipo='os' AND substr(data_abertura,1,7)=?", (mes,))
+        fat_total = one("SELECT COALESCE(SUM(total),0) FROM documentos WHERE tipo='os'")
+        ticket = one("SELECT COALESCE(AVG(total),0) FROM documentos WHERE tipo='os' AND total>0")
+        # pipeline de OS
+        pipe = {s: 0 for s in dbmod.KANBAN_OS_STATUS}
+        for r in con.execute("SELECT status, COUNT(*) FROM documentos WHERE tipo='os' GROUP BY status"):
+            if r[0] in pipe:
+                pipe[r[0]] = r[1]
+        # faturamento dos últimos 6 meses
+        raw = {r[0]: r[1] for r in con.execute(
+            "SELECT substr(data_abertura,1,7) m, COALESCE(SUM(total),0) FROM documentos "
+            "WHERE tipo='os' AND data_abertura IS NOT NULL GROUP BY m")}
+        mes_pt = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+        meses = []
+        for i in range(5, -1, -1):
+            y, mo = agora.year, agora.month - i
+            while mo <= 0:
+                mo += 12
+                y -= 1
+            meses.append({"label": mes_pt[mo - 1], "valor": round(raw.get(f"{y:04d}-{mo:02d}", 0) or 0, 2)})
+        return {"total": total, "orcamentos": orcamentos, "os_count": os_count, "abertas": abertas,
+                "orcamentos_abertos": orc_abertos, "clientes": clientes, "veiculos": veiculos,
+                "faturamento_mes": fat_mes, "faturamento_total": fat_total, "ticket_medio": ticket,
+                "pipeline": pipe, "fat_meses": meses, "recentes": repo.documentos.list(con)[:6]}
 
     # ----------------------------------------------------------------- documentos
     @_api

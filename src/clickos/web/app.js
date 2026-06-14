@@ -218,9 +218,32 @@ const VIEWS = { dashboard: viewDashboard, documentos: viewDocumentos, clientes: 
 async function setView(view) { setActive(view); try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
 
 /* ----------------------------------------------------------------- dashboard */
-function kpi(label, v, icon, bg, color) {
-  return `<div class="card kpi"><div><div class="k-label">${label}</div><div class="k-val">${v}</div></div>
+function kpi(label, v, icon, color, bg, sub) {
+  return `<div class="card kpi"><div style="min-width:0"><div class="k-label">${label}</div><div class="k-val">${v}</div>${sub ? `<div class="k-sub">${esc(sub)}</div>` : ""}</div>
     <div class="k-ico" style="background:${bg};color:${color}">${ic(icon, 22)}</div></div>`;
+}
+function saudacao() { const hr = new Date().getHours(); return hr < 12 ? "Bom dia" : hr < 18 ? "Boa tarde" : "Boa noite"; }
+function hojeExtenso() { try { const s = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); return s.charAt(0).toUpperCase() + s.slice(1); } catch (e) { return ""; } }
+function moneyK(v) { v = num(v); return v >= 1000 ? "R$ " + (v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : money(v); }
+function barChart(data) {
+  const W = 560, H = 190, pad = 26, n = data.length || 1;
+  const max = Math.max(1, ...data.map(d => d.valor));
+  const gap = (W - pad * 2) / n, bw = gap * 0.55;
+  const vazio = data.every(d => !d.valor);
+  let bars = "", labels = "";
+  data.forEach((d, i) => {
+    const bh = vazio ? 0 : (d.valor / max) * (H - pad * 2 - 14);
+    const x = pad + i * gap + (gap - bw) / 2, y = H - pad - bh;
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, bh).toFixed(1)}" rx="5" fill="url(#barg)"></rect>`;
+    if (d.valor) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" text-anchor="middle" font-size="10" fill="#475569">${moneyK(d.valor)}</text>`;
+    labels += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - pad + 16}" text-anchor="middle" font-size="11" fill="#64748b">${esc(d.label)}</text>`;
+  });
+  const wrap = h(`<div></div>`);
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
+    <defs><linearGradient id="barg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs>
+    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e5e7eb"/>${bars}${labels}</svg>
+    ${vazio ? '<div class="muted small" style="text-align:center;margin-top:-30px">Ainda sem faturamento registrado</div>' : ""}`;
+  return wrap;
 }
 function statusClass(s) {
   if (["Aberta", "Aberto"].includes(s)) return "b-aberta";
@@ -230,19 +253,36 @@ function statusClass(s) {
 }
 async function viewDashboard() {
   const d = await api("dashboard");
-  render(`<h1 class="page-title">Dashboard</h1><p class="page-sub">Visão geral do sistema</p>
-    <div class="cards kpis">
-      ${kpi("Total de Documentos", d.total, "file", "#dbeafe", "#2563eb")}
-      ${kpi("Abertas", d.abertas, "trending", "#fef9c3", "#d97706")}
-      ${kpi("Clientes", d.clientes, "users", "#f3e8ff", "#7c3aed")}
-      ${kpi("Faturamento Mês", money(d.faturamento_mes), "dollar", "#dcfce7", "#16a34a")}
+  const nome = (B.empresa && (B.empresa.nome_fantasia || B.empresa.razao_social)) || "";
+  render(`
+    <div class="between dash-head">
+      <div><h1 class="page-title">${saudacao()}! 👋</h1><p class="page-sub">${esc(nome)}${nome ? " · " : ""}${hojeExtenso()}</p></div>
+      <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Novo Cliente</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Novo Documento</span></button></div>
     </div>
-    <div class="card mt"><div class="between"><h3 style="margin:0">Documentos Recentes</h3>
-      <button class="btn btn-sm" id="vt">Ver todas</button></div><div id="recent" style="margin-top:8px"></div></div>`);
+    <div class="cards kpis">
+      ${kpi("Faturamento do mês", money(d.faturamento_mes), "dollar", "#16a34a", "#dcfce7", "Total em OS: " + money(d.faturamento_total))}
+      ${kpi("OS em aberto", d.abertas, "trending", "#d97706", "#fef9c3", d.os_count + " OS no total")}
+      ${kpi("Orçamentos abertos", d.orcamentos_abertos, "file", "#2563eb", "#dbeafe", d.orcamentos + " orçamentos")}
+      ${kpi("Clientes", d.clientes, "users", "#7c3aed", "#f3e8ff", d.veiculos + " veículos")}
+    </div>
+    <div class="dash-grid mt">
+      <div class="card"><div class="between"><h3 style="margin:0">Faturamento (últimos 6 meses)</h3><span class="muted small">Ticket médio: ${money(d.ticket_medio)}</span></div><div id="chart" style="margin-top:12px"></div></div>
+      <div class="card"><h3 style="margin:0 0 14px">Pipeline de OS</h3><div id="pipe"></div></div>
+    </div>
+    <div class="card mt"><div class="between"><h3 style="margin:0">Documentos recentes</h3><button class="btn btn-sm" id="vt">Ver todos</button></div><div id="recent" style="margin-top:8px"></div></div>`);
+  main().querySelector("#chart").appendChild(barChart(d.fat_meses || []));
+  const pipe = main().querySelector("#pipe");
+  const cores = { "Aberta": "#f59e0b", "Em Execução": "#2563eb", "Concluída": "#16a34a" };
+  const vals = Object.values(d.pipeline || {}); const maxP = Math.max(1, ...vals);
+  Object.entries(d.pipeline || {}).forEach(([k, v]) => {
+    pipe.appendChild(h(`<div class="pipe-row"><div class="pipe-top"><span>${esc(k)}</span><b>${v}</b></div><div class="pipe-bar"><span style="width:${Math.round(v / maxP * 100)}%;background:${cores[k] || "#94a3b8"}"></span></div></div>`));
+  });
   const rec = main().querySelector("#recent");
   if (!d.recentes.length) rec.appendChild(emptyState("file", "Nenhum documento ainda", "Comece criando um orçamento ou ordem de serviço.", "Novo Documento", () => openDocForm()));
   else renderDocsList(rec, d.recentes);
   main().querySelector("#vt").onclick = () => setView("documentos");
+  main().querySelector("#nd").onclick = () => openDocForm();
+  main().querySelector("#nc").onclick = () => formCliente(null);
 }
 
 /* ----------------------------------------------------------------- documentos (kanban + lista) */
