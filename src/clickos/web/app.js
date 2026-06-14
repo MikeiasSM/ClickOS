@@ -6,6 +6,7 @@ let B = { status_orcamento: [], status_os: [], kanban_os_status: [], prioridades
   formas_pagamento: [], niveis_combustivel: [], estado_geral: [], pecas: [] };
 let SUG = { marcas: [], cores: [], combustiveis: [], cidades: [] };
 let CITIES = [];  // base IBGE [[cidade, uf], ...] carregada uma vez
+let CURRENT_USER = null;  // usuário autenticado na sessão
 
 /* ----------------------------------------------------------------- ícones (Feather/Lucide, MIT) */
 const ICONS = {
@@ -37,6 +38,9 @@ const ICONS = {
   pin: '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
   doc: '<path d="M9 12h6"/><path d="M9 16h6"/><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
   tag: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
 };
 function ic(name, size) {
   const s = size || 18;
@@ -227,7 +231,7 @@ function cadastrarCidade(nome, onDone) {
 
 /* ----------------------------------------------------------------- router */
 function setActive(view) { document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("active", a.dataset.view === view)); }
-const VIEWS = { dashboard: viewDashboard, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos, empresa: viewEmpresa };
+const VIEWS = { dashboard: viewDashboard, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos, empresa: viewEmpresa, usuarios: viewUsuarios };
 async function setView(view) { setActive(view); try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
 
 /* ----------------------------------------------------------------- dashboard */
@@ -251,11 +255,11 @@ function barChart(data) {
     if (d.valor) bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" text-anchor="middle" font-size="10" fill="#475569">${moneyK(d.valor)}</text>`;
     labels += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - pad + 16}" text-anchor="middle" font-size="11" fill="#64748b">${esc(d.label)}</text>`;
   });
-  const wrap = h(`<div></div>`);
+  const wrap = h(`<div style="position:relative"></div>`);
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
     <defs><linearGradient id="barg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs>
-    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e5e7eb"/>${bars}${labels}</svg>
-    ${vazio ? '<div class="muted small" style="text-align:center;margin-top:-30px">Ainda sem faturamento registrado</div>' : ""}`;
+    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#e5e7eb"/>${bars}${labels}</svg>`;
+  if (vazio) wrap.appendChild(h('<div class="muted small" style="position:absolute;left:0;right:0;top:0;bottom:34px;display:flex;align-items:center;justify-content:center;pointer-events:none">Ainda sem faturamento registrado</div>'));
   return wrap;
 }
 function donut(segments, opts) {
@@ -288,10 +292,11 @@ function statusClass(s) {
 }
 async function viewDashboard() {
   const d = await api("dashboard");
-  const nome = (B.empresa && (B.empresa.nome_fantasia || B.empresa.razao_social)) || "";
+  const u = CURRENT_USER || {};
+  const primeiroNome = (String(u.nome || u.login || "").trim().split(/\s+/)[0]) || "";
   render(`
     <div class="between dash-head">
-      <div><h1 class="page-title">${saudacao()}! 👋</h1><p class="page-sub">${esc(nome)}${nome ? " · " : ""}${hojeExtenso()}</p></div>
+      <div><h1 class="page-title">${saudacao()}${primeiroNome ? ", " + esc(primeiroNome) : ""}! 👋</h1><p class="page-sub">${hojeExtenso()}</p></div>
       <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Novo Cliente</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Novo Documento</span></button></div>
     </div>
     <div class="cards kpis">
@@ -357,8 +362,9 @@ function renderDocsList(board, docs) {
   board.appendChild(list); injectIcons(board);
 }
 function renderKanban(board, docs) {
+  const colunas = B.kanban_colunas || B.kanban_os_status;
   const cols = [{ key: "orcamentos", title: "Orçamentos", match: d => d.tipo === "orcamento" && !["Aprovado", "Recusado", "Cancelado"].includes(d.status) }]
-    .concat(B.kanban_os_status.map(s => ({ key: s, title: s, match: d => d.tipo === "os" && d.status === s })));
+    .concat(colunas.map(s => ({ key: s, title: s, match: d => d.tipo === "os" && d.status === s })));
   const wrap = h(`<div class="kanban"></div>`);
   cols.forEach(col => {
     const items = docs.filter(col.match);
@@ -378,11 +384,12 @@ function kcard(d) {
     <div class="kmeta">${esc(((d.veiculo_marca || "") + " " + (d.veiculo_modelo || "")).trim() || "—")}<br>${esc(d.numero)} · ${esc(d.cliente_nome || "-")} · ${fmtDate(d.data_abertura)}</div>
     <div class="kfoot"><span class="money">${money(d.total)}</span><span class="kmini">
       ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}
-      <button data-a="ver" title="Ver">${ic("eye", 14)}</button><button data-a="edit" title="Editar">${ic("edit", 14)}</button></span></div>`);
+      <button data-a="ver" title="Ver">${ic("eye", 14)}</button><button data-a="edit" title="Editar">${ic("edit", 14)}</button><button data-a="del" title="Excluir">${ic("trash", 14)}</button></span></div>`);
   card.addEventListener("dragstart", () => { card.classList.add("dragging"); window.__drag = { id: d.id, tipo: d.tipo, status: d.status }; });
   card.addEventListener("dragend", () => card.classList.remove("dragging"));
   card.querySelector("[data-a=ver]").onclick = e => { e.stopPropagation(); printPreview(d.id); };
   card.querySelector("[data-a=edit]").onclick = e => { e.stopPropagation(); openDocForm(d.id); };
+  card.querySelector("[data-a=del]").onclick = e => { e.stopPropagation(); delDoc(d.id); };
   return card;
 }
 async function onDropCard(colKey) {
@@ -390,10 +397,16 @@ async function onDropCard(colKey) {
   const id = drag.id;
   if (colKey === "orcamentos") { if (drag.tipo === "os") toast("Uma OS não retorna a orçamento.", "err"); return; }
   if (drag.tipo === "orcamento") {
-    if (!await confirma(`Converter este orçamento em Ordem de Serviço (coluna "${colKey}")?`)) return;
-    const os = await api("converter_os", id);
-    if (colKey !== "Aberta") await api("set_status", { id: os.id, status: colKey });
-    toast("Convertido em " + os.numero, "ok");
+    if (colKey === "Cancelada") {
+      if (!await confirma("Cancelar este orçamento?", { danger: true, ok: "Cancelar orçamento" })) return;
+      await api("set_status", { id, status: "Cancelado" });
+      toast("Orçamento cancelado", "ok");
+    } else {
+      if (!await confirma(`Converter este orçamento em Ordem de Serviço (coluna "${colKey}")?`)) return;
+      const os = await api("converter_os", id);
+      if (colKey !== "Aberta") await api("set_status", { id: os.id, status: colKey });
+      toast("Convertido em " + os.numero, "ok");
+    }
   } else {
     if (drag.status === colKey) return;
     await api("set_status", { id, status: colKey });
@@ -412,9 +425,11 @@ async function openDocForm(id) {
   const doc = id ? await api("get_documento", id) : { tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: today(),
     cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, acrescimo: 0, itens: [], lataria: [],
     forma_pagamento: "", prazo_execucao: "", validade: "", observacoes: B.empresa ? B.empresa.termos_padrao : "",
-    estado_geral: "", nivel_combustivel: "", obs_entrada: "", item_chave_principal: 0, item_chave_reserva: 0, item_documento: 0, item_manual: 0 };
+    estado_geral: "", nivel_combustivel: "", obs_entrada: "", item_chave_principal: 0, item_chave_reserva: 0, item_documento: 0, item_manual: 0,
+    usuario_id: (CURRENT_USER && CURRENT_USER.id) || null };
   const itens = (doc.itens && doc.itens.length ? doc.itens.map(i => ({ ...i })) : [blankItem()]);
   const latMap = {}; (doc.lataria || []).forEach(p => latMap[p.peca] = p.estado);
+  const respNome = doc.usuario_nome || (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "—";
 
   render(`
     <div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
@@ -431,7 +446,8 @@ async function openDocForm(id) {
         <div class="field"><label>Cliente</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div>
       </div>
-      <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div></div>
+      <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
+        <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
     </div>
 
     <div class="card mt"><div class="between"><h3 class="sec-title">Itens</h3>
@@ -573,6 +589,7 @@ async function openDocForm(id) {
   main().querySelector("#salvar").onclick = async () => {
     const payload = {
       id: doc.id, tipo: tipoCombo._value(), status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: val("#f_data"),
+      usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
       cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
       desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
       forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: val("#f_prazo"), validade: val("#f_val"),
@@ -889,6 +906,103 @@ async function viewEmpresa() {
   };
 }
 
+/* ----------------------------------------------------------------- usuários */
+async function viewUsuarios() {
+  setActive("usuarios");
+  const us = await api("list_usuarios");
+  render(`<div class="between"><div><h1 class="page-title">Usuários</h1><p class="page-sub">Controle de acesso ao sistema</p></div>
+      <button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Usuário</span></button></div>
+    <div id="lista" class="mt"></div>`);
+  const lst = main().querySelector("#lista");
+  if (!us.length) { lst.appendChild(emptyState("shield", "Nenhum usuário", "Cadastre usuários para controlar o acesso.", "Novo Usuário", () => formUsuario(null))); }
+  else {
+    const list = h(`<div class="list-rows"></div>`);
+    us.forEach(u => {
+      const eu = CURRENT_USER && u.id === CURRENT_USER.id;
+      const r = h(`<div class="list-row"><div class="avatar blue">${ic("user", 22)}</div><div class="grow">
+        <div style="font-weight:700">${esc(u.nome || u.login)} ${eu ? '<span class="badge b-os">você</span>' : ""} ${u.ativo ? "" : '<span class="badge b-gray">Inativo</span>'}</div>
+        <div class="small muted">Login: ${esc(u.login)}</div></div><div class="acts"></div></div>`);
+      r.querySelector(".acts").appendChild(btn("", "edit", () => formUsuario(u)));
+      r.querySelector(".acts").appendChild(btn("", "trash", () => delUsuario(u), "btn-danger"));
+      list.appendChild(r);
+    });
+    lst.appendChild(list); injectIcons(lst);
+  }
+  main().querySelector("#novo").onclick = () => formUsuario(null);
+}
+async function delUsuario(u) {
+  if (CURRENT_USER && u.id === CURRENT_USER.id) { toast("Você não pode excluir o usuário conectado.", "err"); return; }
+  if (await confirma(`Excluir o usuário "${esc(u.login)}"?`, { danger: true, ok: "Excluir" })) {
+    await api("delete_usuario", u.id); toast("Usuário excluído", "ok"); viewUsuarios();
+  }
+}
+function formUsuario(u) {
+  u = u || { ativo: 1 };
+  const m = h(`<div class="modal" style="width:480px"><button class="close">×</button><h3>${u.id ? "Editar" : "Novo"} Usuário</h3>
+    <div class="field"><label>Nome</label><input id="nome" value="${esc(u.nome || "")}"></div>
+    <div class="field"><label>Login *</label><input id="login" value="${esc(u.login || "")}" autocomplete="off"></div>
+    <div class="field"><label>Senha ${u.id ? "(em branco mantém a atual)" : "*"}</label><input id="senha" type="password" autocomplete="new-password" placeholder="${u.id ? "••••••••" : "Mínimo 4 caracteres"}"></div>
+    <div class="field"><label>Situação</label><div id="c_ativo"></div></div>
+    <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
+  const bg = openModal(m);
+  const ativoCombo = selectCombo([{ value: "1", label: "Ativo" }, { value: "0", label: "Inativo" }], u.ativo ? "1" : "0", null);
+  m.querySelector("#c_ativo").appendChild(ativoCombo);
+  m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
+  m.querySelector("#sv").onclick = async () => {
+    const senha = m.querySelector("#senha").value;
+    const payload = { id: u.id, nome: val("#nome", m), login: val("#login", m), senha, ativo: parseInt(ativoCombo._value()) };
+    if (!payload.login) { toast("Login é obrigatório", "err"); return; }
+    if (!u.id && senha.length < 4) { toast("A senha deve ter ao menos 4 caracteres", "err"); return; }
+    const saved = await api("save_usuario", payload);
+    if (CURRENT_USER && saved && saved.id === CURRENT_USER.id) { CURRENT_USER.nome = saved.nome; CURRENT_USER.login = saved.login; mountUserChip(); }
+    toast("Usuário salvo", "ok"); bg.remove(); viewUsuarios();
+  };
+}
+
+/* ----------------------------------------------------------------- login / sessão */
+function showLogin() {
+  return new Promise(resolve => {
+    const ov = h(`<div class="login-ov"><div class="login-card">
+      <div class="login-logo">${ic("wrench", 30)}</div>
+      <h2>ClickOS</h2><p class="login-sub">Entre para continuar</p>
+      <div class="field"><label>Usuário</label><input id="lg_user" autocomplete="off" placeholder="Login"></div>
+      <div class="field"><label>Senha</label><input id="lg_pass" type="password" placeholder="Senha"></div>
+      <button class="btn btn-primary" id="lg_btn">${ic("lock", 16)}<span>Entrar</span></button>
+      <div class="login-err" id="lg_err"></div></div></div>`);
+    document.body.appendChild(ov); injectIcons(ov);
+    const user = ov.querySelector("#lg_user"), pass = ov.querySelector("#lg_pass"), err = ov.querySelector("#lg_err"), bt = ov.querySelector("#lg_btn");
+    setTimeout(() => user.focus(), 30);
+    const doLogin = async () => {
+      err.textContent = ""; bt.disabled = true;
+      try {
+        const r = await window.pywebview.api.login({ login: user.value.trim(), senha: pass.value });
+        if (r && r.ok === false) { err.textContent = r.erro || "Login ou senha inválidos."; pass.value = ""; pass.focus(); bt.disabled = false; return; }
+        ov.remove(); resolve(r.data);
+      } catch (e) { err.textContent = "Erro ao entrar. Tente novamente."; bt.disabled = false; }
+    };
+    bt.onclick = doLogin;
+    user.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); pass.focus(); } });
+    pass.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); doLogin(); } });
+  });
+}
+function mountUserChip() {
+  const box = document.getElementById("user-box"); if (!box) return;
+  box.style.display = "flex";
+  document.getElementById("user-name").textContent = (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "";
+  document.getElementById("btn-logout").onclick = logout;
+}
+async function logout() {
+  if (!await confirma("Deseja sair da sua conta?", { ok: "Sair" })) return;
+  CURRENT_USER = null;
+  document.getElementById("app").style.display = "none";
+  document.getElementById("user-box").style.display = "none";
+  main().innerHTML = "";
+  CURRENT_USER = await showLogin();
+  document.getElementById("app").style.display = "flex";
+  mountUserChip();
+  setView("dashboard");
+}
+
 /* ----------------------------------------------------------------- backup/restore + init */
 async function doBackup() { const r = await api("backup"); if (r && r.arquivo) toast("Backup salvo em: " + r.arquivo, "ok"); }
 async function doRestore() {
@@ -904,11 +1018,16 @@ function bindNav() {
 async function start() {
   window.__p = "begin";
   injectIcons(document);
-  bindNav();
+  const app = document.getElementById("app");
+  app.style.display = "none";   // só mostra após o login
   window.__p = "ui-ready";
   try { B = await api("bootstrap"); window.__p = "bootstrap-ok"; } catch (e) { window.__p = "bootstrap-err:" + e.message; }
   try { SUG = await api("sugestoes"); window.__p = "sug-ok"; } catch (e) { window.__p = "sug-err:" + e.message; }
   try { CITIES = await api("cidades"); } catch (e) { CITIES = []; }
+  CURRENT_USER = await showLogin();
+  app.style.display = "flex";
+  bindNav();
+  mountUserChip();
   setView("dashboard");
   window.__p = "done";
 }

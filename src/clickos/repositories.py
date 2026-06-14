@@ -166,7 +166,7 @@ class _Documentos:
             "desconto_geral", "acrescimo", "forma_pagamento", "prazo_execucao", "validade",
             "observacoes", "estado_geral", "nivel_combustivel", "obs_entrada",
             "item_chave_principal", "item_chave_reserva", "item_documento", "item_manual",
-            "origem_orcamento_id"]
+            "origem_orcamento_id", "usuario_id"]
 
     def create(self, con, data, stamp=None):
         now = _now(stamp)
@@ -221,9 +221,10 @@ class _Documentos:
     def get(self, con, did):
         d = _row(con.execute(
             "SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa, "
-            "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo "
+            "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo, u.nome AS usuario_nome "
             "FROM documentos d LEFT JOIN clientes c ON c.id=d.cliente_id "
-            "LEFT JOIN veiculos v ON v.id=d.veiculo_id WHERE d.id=?", (did,)).fetchone())
+            "LEFT JOIN veiculos v ON v.id=d.veiculo_id "
+            "LEFT JOIN usuarios u ON u.id=d.usuario_id WHERE d.id=?", (did,)).fetchone())
         if d is None:
             return None
         d["itens"] = _rows(con.execute(
@@ -234,9 +235,10 @@ class _Documentos:
 
     def list(self, con, tipo=None, status=None, q=None):
         sql = ("SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa, "
-               "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo "
+               "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo, u.nome AS usuario_nome "
                "FROM documentos d LEFT JOIN clientes c ON c.id=d.cliente_id "
-               "LEFT JOIN veiculos v ON v.id=d.veiculo_id WHERE 1=1")
+               "LEFT JOIN veiculos v ON v.id=d.veiculo_id "
+               "LEFT JOIN usuarios u ON u.id=d.usuario_id WHERE 1=1")
         args = []
         if tipo:
             sql += " AND d.tipo=?"; args.append(tipo)
@@ -252,6 +254,76 @@ class _Documentos:
     def delete(self, con, did):
         con.execute("DELETE FROM documentos WHERE id=?", (did,))
         con.commit()
+
+
+# --------------------------------------------------------------------------- usuarios
+class _Usuarios:
+    PUB = "id, login, nome, ativo, criado_em"  # nunca expõe senha_hash/salt à UI
+
+    def list(self, con):
+        return _rows(con.execute(
+            f"SELECT {self.PUB} FROM usuarios ORDER BY login COLLATE NOCASE").fetchall())
+
+    def get(self, con, uid):
+        return _row(con.execute(f"SELECT {self.PUB} FROM usuarios WHERE id=?", (uid,)).fetchone())
+
+    def by_login(self, con, login):
+        return _row(con.execute(
+            "SELECT * FROM usuarios WHERE login=? COLLATE NOCASE", ((login or "").strip(),)).fetchone())
+
+    def create(self, con, data, stamp=None):
+        login = (data.get("login") or "").strip()
+        senha = data.get("senha") or ""
+        if not login:
+            raise ValueError("Login é obrigatório.")
+        if len(senha) < 4:
+            raise ValueError("A senha deve ter ao menos 4 caracteres.")
+        if self.by_login(con, login):
+            raise ValueError("Já existe um usuário com esse login.")
+        salt, senha_hash = services.hash_senha(senha)
+        cur = con.execute(
+            "INSERT INTO usuarios(login, nome, senha_hash, salt, ativo, criado_em) VALUES (?,?,?,?,?,?)",
+            (login, (data.get("nome") or login).strip(), senha_hash, salt,
+             1 if data.get("ativo", 1) else 0, _now(stamp)))
+        con.commit()
+        return self.get(con, cur.lastrowid)
+
+    def update(self, con, uid, data, stamp=None):
+        row = con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone()
+        if row is None:
+            raise ValueError("Usuário não encontrado.")
+        login = (data.get("login") or row["login"]).strip()
+        if con.execute("SELECT 1 FROM usuarios WHERE login=? COLLATE NOCASE AND id<>?",
+                       (login, uid)).fetchone():
+            raise ValueError("Já existe um usuário com esse login.")
+        nome = (data.get("nome") or row["nome"] or login).strip()
+        ativo = 1 if data.get("ativo", row["ativo"]) else 0
+        senha = (data.get("senha") or "").strip()
+        if senha:
+            if len(senha) < 4:
+                raise ValueError("A senha deve ter ao menos 4 caracteres.")
+            salt, senha_hash = services.hash_senha(senha)
+            con.execute("UPDATE usuarios SET login=?, nome=?, ativo=?, senha_hash=?, salt=? WHERE id=?",
+                        (login, nome, ativo, senha_hash, salt, uid))
+        else:
+            con.execute("UPDATE usuarios SET login=?, nome=?, ativo=? WHERE id=?",
+                        (login, nome, ativo, uid))
+        con.commit()
+        return self.get(con, uid)
+
+    def delete(self, con, uid):
+        if con.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] <= 1:
+            raise services.EmVinculo("Não é possível excluir o único usuário do sistema.")
+        con.execute("DELETE FROM usuarios WHERE id=?", (uid,))
+        con.commit()
+
+    def autenticar(self, con, login, senha):
+        row = self.by_login(con, login)
+        if row is None or not row["ativo"]:
+            return None
+        if services.verifica_senha(senha, row["salt"], row["senha_hash"]):
+            return {"id": row["id"], "login": row["login"], "nome": row["nome"]}
+        return None
 
 
 def sugestoes(con):
@@ -282,3 +354,4 @@ clientes = _Clientes()
 veiculos = _Veiculos()
 itens = _Itens()
 documentos = _Documentos()
+usuarios = _Usuarios()

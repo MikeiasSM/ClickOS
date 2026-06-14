@@ -84,6 +84,7 @@ class Api:
             "status_orcamento": dbmod.STATUS_ORCAMENTO,
             "status_os": dbmod.STATUS_OS,
             "kanban_os_status": dbmod.KANBAN_OS_STATUS,
+            "kanban_colunas": dbmod.KANBAN_COLUNAS,
             "prioridades": dbmod.PRIORIDADES,
             "ufs": dbmod.UFS,
             "formas_pagamento": dbmod.FORMAS_PAGAMENTO,
@@ -270,6 +271,29 @@ class Api:
         self.con.execute("UPDATE empresa SET logo=? WHERE id=1", (Path(path).read_bytes(),))
         self.con.commit()
         return {"has_logo": True}
+
+    # ----------------------------------------------------------------- usuários / login
+    @_api
+    def login(self, payload):
+        user = repo.usuarios.autenticar(self.con, (payload or {}).get("login"), (payload or {}).get("senha"))
+        if not user:
+            raise ValueError("Login ou senha inválidos.")
+        return user
+
+    @_api
+    def list_usuarios(self):
+        return repo.usuarios.list(self.con)
+
+    @_api
+    def save_usuario(self, payload):
+        if payload.get("id"):
+            return repo.usuarios.update(self.con, payload["id"], payload, stamp=_stamp())
+        return repo.usuarios.create(self.con, payload, stamp=_stamp())
+
+    @_api
+    def delete_usuario(self, uid):
+        repo.usuarios.delete(self.con, uid)
+        return True
 
     # ----------------------------------------------------------------- backup / restore
     @_api

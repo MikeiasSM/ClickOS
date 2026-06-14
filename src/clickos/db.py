@@ -1,10 +1,11 @@
 """Conexão SQLite, schema, migração por versão e seed (empresa ALVES + catálogo)."""
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -18,8 +19,10 @@ NIVEIS_COMBUSTIVEL = ["Reserva", "1/4", "1/2", "3/4", "Cheio"]
 # Status simplificados e diferentes por tipo
 STATUS_ORCAMENTO = ["Aberto", "Aprovado", "Recusado", "Cancelado"]
 STATUS_OS = ["Aberta", "Em Execução", "Concluída", "Entregue", "Cancelada"]
-# Colunas do quadro (pipeline): Orçamentos + os 3 status principais da OS
+# Status da OS exibidos no donut "Pipeline de OS" (apenas o fluxo ativo)
 KANBAN_OS_STATUS = ["Aberta", "Em Execução", "Concluída"]
+# Colunas do quadro kanban (além de "Orçamentos"): inclui "Cancelada"
+KANBAN_COLUNAS = ["Aberta", "Em Execução", "Concluída", "Cancelada"]
 PRIORIDADES = ["Normal", "Alta", "Urgente"]
 UFS = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB",
        "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"]
@@ -87,7 +90,8 @@ CREATE TABLE IF NOT EXISTS documentos (
   estado_geral TEXT, nivel_combustivel TEXT, obs_entrada TEXT,
   item_chave_principal INTEGER DEFAULT 0, item_chave_reserva INTEGER DEFAULT 0,
   item_documento INTEGER DEFAULT 0, item_manual INTEGER DEFAULT 0,
-  origem_orcamento_id INTEGER REFERENCES documentos(id)
+  origem_orcamento_id INTEGER REFERENCES documentos(id),
+  usuario_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS documento_itens (
@@ -106,6 +110,12 @@ CREATE TABLE IF NOT EXISTS documento_lataria (
 
 CREATE TABLE IF NOT EXISTS cidades_custom (
   nome TEXT NOT NULL, uf TEXT NOT NULL, UNIQUE(nome, uf)
+);
+
+CREATE TABLE IF NOT EXISTS usuarios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  login TEXT NOT NULL UNIQUE, nome TEXT, senha_hash TEXT, salt TEXT,
+  ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT
 );
 """
 
@@ -148,9 +158,25 @@ def _migrate(con: sqlite3.Connection) -> None:
     if ver < 2:
         _add_column(con, "documentos", "prioridade", "TEXT DEFAULT 'Normal'")
         con.execute("UPDATE meta SET schema_version = 2")
+    if ver < 3:
+        _add_column(con, "documentos", "usuario_id", "INTEGER")
+        con.execute("UPDATE meta SET schema_version = 3")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
+    _seed_usuarios(con)
     con.commit()
+
+
+def _seed_usuarios(con: sqlite3.Connection) -> None:
+    """Cria o usuário padrão SUPORTE (senha 1234567890) se a tabela estiver vazia."""
+    if con.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] > 0:
+        return
+    from . import services
+    salt, senha_hash = services.hash_senha("1234567890")
+    con.execute(
+        "INSERT INTO usuarios(login, nome, senha_hash, salt, ativo, criado_em) VALUES (?,?,?,?,1,?)",
+        ("SUPORTE", "Suporte", senha_hash, salt, datetime.now().isoformat(timespec="seconds")),
+    )
 
 
 def _seed(con: sqlite3.Connection) -> None:

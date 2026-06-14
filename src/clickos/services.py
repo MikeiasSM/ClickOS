@@ -1,8 +1,32 @@
 """Regras de negócio puras: numeração, cálculo de totais e conversão Orçamento->OS."""
+import hashlib
+import hmac
+import os
+
+PBKDF2_ITER = 120000
 
 
 class EmVinculo(Exception):
     """Levantada ao tentar excluir um registro que possui documentos vinculados."""
+
+
+def hash_senha(senha, salt=None):
+    """Gera (salt_hex, hash_hex) com PBKDF2-HMAC-SHA256 (stdlib, sem dependências).
+    Se `salt` vier (hex str), reaproveita-o — útil para conferir uma senha."""
+    if salt is None:
+        salt = os.urandom(16)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", str(senha or "").encode("utf-8"), salt, PBKDF2_ITER)
+    return salt.hex(), dk.hex()
+
+
+def verifica_senha(senha, salt_hex, hash_hex) -> bool:
+    """Compara a senha informada com o hash salvo (comparação em tempo constante)."""
+    if not salt_hex or not hash_hex:
+        return False
+    _, calc = hash_senha(senha, salt_hex)
+    return hmac.compare_digest(calc, hash_hex)
 
 
 def _num(x) -> float:

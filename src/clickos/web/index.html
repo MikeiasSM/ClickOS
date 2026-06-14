@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app">
+  <div id="app" style="display:none">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-ico"><span class="ic" data-icon="wrench"></span></div>
@@ -24,7 +24,13 @@
         <a data-view="veiculos"><span class="ic" data-icon="car"></span><span>Veículos</span></a>
         <a data-view="produtos"><span class="ic" data-icon="box"></span><span>Produtos e Serviços</span></a>
         <a data-view="empresa"><span class="ic" data-icon="building"></span><span>Dados da Empresa</span></a>
+        <a data-view="usuarios"><span class="ic" data-icon="shield"></span><span>Usuários</span></a>
       </nav>
+      <div class="user-box" id="user-box" style="display:none">
+        <div class="user-ava"><span class="ic" data-icon="user"></span></div>
+        <div class="user-info"><div class="user-name" id="user-name"></div><div class="user-role">Conectado</div></div>
+        <button class="user-logout" id="btn-logout" title="Sair"><span class="ic" data-icon="logout"></span></button>
+      </div>
       <div class="sidebar-foot">
         <button id="btn-backup" class="btn btn-ghost btn-sm"><span class="ic" data-icon="save"></span> Backup</button>
         <button id="btn-restore" class="btn btn-ghost btn-sm"><span class="ic" data-icon="upload"></span> Restaurar</button>
