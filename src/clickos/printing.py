@@ -47,3 +47,12 @@ def render_documento(doc, empresa, cliente=None, veiculo=None, gerado_em="") -> 
         logo_uri=logo_data_uri(empresa), pecas=dbmod.LISTA_PECAS,
         niveis=dbmod.NIVEIS_COMBUSTIVEL, gerado_em=gerado_em,
     )
+
+
+def render_recebimento(doc, empresa, cliente=None, veiculo=None, gerado_em="") -> str:
+    """Comprovante de recebimento do veículo (prova de custódia, gerado na abertura da O.S.)."""
+    tmpl = _environment().get_template("recebimento.html")
+    return tmpl.render(
+        doc=doc, empresa=empresa, cliente=cliente or {}, veiculo=veiculo or {},
+        logo_uri=logo_data_uri(empresa), niveis=dbmod.NIVEIS_COMBUSTIVEL, gerado_em=gerado_em,
+    )

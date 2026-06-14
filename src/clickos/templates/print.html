@@ -69,6 +69,7 @@
           <tr><td class="lbl">DATA</td><td>{{ doc.data_abertura|dt }}</td></tr>
           <tr><td class="lbl">STATUS</td><td>{{ doc.status }}</td></tr>
           {% if doc.usuario_nome %}<tr><td class="lbl">ATEND.</td><td>{{ doc.usuario_nome }}</td></tr>{% endif %}
+          {% if doc.faturado_em %}<tr><td class="lbl">FATUR.</td><td>{{ doc.faturado_em|dt }}</td></tr>{% endif %}
         </table>
       </td>
     </tr>
@@ -155,6 +156,7 @@
         <span class="bx {{ 'on' if doc.item_manual }}"></span> Manual
       </td>
     </tr>
+    {% if doc.ocorrencia %}<tr><td class="lbl">Ocorrência</td><td colspan="3">{{ doc.ocorrencia }}</td></tr>{% endif %}
     <tr><td class="lbl">Obs. de Entrada</td><td colspan="3">{{ doc.obs_entrada or '' }}</td></tr>
   </table>
 
@@ -178,7 +180,7 @@
       <td class="right">{{ it.valor_liquido|brl }}</td>
     </tr>
     {% endfor %}
-    {% for _ in range(6 - (doc.itens|length if doc.itens|length < 6 else 0)) %}
+    {% for _ in range([6 - (doc.itens|length), 0]|max) %}
     <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
     {% endfor %}
   </table>
@@ -210,6 +212,11 @@
     </tr>
     {% if doc.observacoes %}<tr><td class="lbl">Observações</td><td colspan="5">{{ doc.observacoes }}</td></tr>{% endif %}
   </table>
+
+  {% if doc.parecer_mecanico or doc.mecanico %}
+  <div class="sec mt">PARECER TÉCNICO{% if doc.mecanico %} — {{ doc.mecanico }}{% endif %}</div>
+  <table class="fields"><tr><td colspan="6" style="min-height:22px">{{ doc.parecer_mecanico or '' }}</td></tr></table>
+  {% endif %}
 
   <!-- ASSINATURAS -->
   <table class="assin">

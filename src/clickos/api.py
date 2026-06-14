@@ -125,18 +125,21 @@ class Api:
         orc_abertos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status='Aberto'")
         clientes = one("SELECT COUNT(*) FROM clientes")
         veiculos = one("SELECT COUNT(*) FROM veiculos")
-        fat_mes = one("SELECT COALESCE(SUM(total),0) FROM documentos WHERE tipo='os' AND substr(data_abertura,1,7)=?", (mes,))
-        fat_total = one("SELECT COALESCE(SUM(total),0) FROM documentos WHERE tipo='os'")
-        ticket = one("SELECT COALESCE(AVG(total),0) FROM documentos WHERE tipo='os' AND total>0")
+        # Faturamento = somente O.S. FATURADAS (status 'Entregue'), pela DATA DE FATURAMENTO
+        # (faturado_em; cai para a data de abertura quando vazio). Eixo temporal = faturado_em.
+        DATA_FAT = "substr(COALESCE(NULLIF(faturado_em,''), data_abertura),1,7)"
+        FATURADAS = "tipo='os' AND status='Entregue'"
+        fat_mes = one(f"SELECT COALESCE(SUM(total),0) FROM documentos WHERE {FATURADAS} AND {DATA_FAT}=?", (mes,))
+        fat_total = one(f"SELECT COALESCE(SUM(total),0) FROM documentos WHERE {FATURADAS}")
+        ticket = one(f"SELECT COALESCE(AVG(total),0) FROM documentos WHERE {FATURADAS} AND total>0")
         # pipeline de OS
         pipe = {s: 0 for s in dbmod.KANBAN_OS_STATUS}
         for r in con.execute("SELECT status, COUNT(*) FROM documentos WHERE tipo='os' GROUP BY status"):
             if r[0] in pipe:
                 pipe[r[0]] = r[1]
-        # faturamento dos últimos 6 meses
+        # faturamento dos últimos 6 meses (faturadas, por mês de faturamento)
         raw = {r[0]: r[1] for r in con.execute(
-            "SELECT substr(data_abertura,1,7) m, COALESCE(SUM(total),0) FROM documentos "
-            "WHERE tipo='os' AND data_abertura IS NOT NULL GROUP BY m")}
+            f"SELECT {DATA_FAT} m, COALESCE(SUM(total),0) FROM documentos WHERE {FATURADAS} GROUP BY m")}
         mes_pt = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
         meses = []
         for i in range(5, -1, -1):
@@ -181,21 +184,24 @@ class Api:
     def converter_os(self, did):
         return services.convert_to_os(self.con, did, stamp=_stamp())
 
-    def _render(self, did):
+    def _render(self, did, renderer):
         doc = repo.documentos.get(self.con, did)
         if not doc:
             raise ValueError("Documento não encontrado.")
         cliente = repo.clientes.get(self.con, doc["cliente_id"]) if doc.get("cliente_id") else {}
         veiculo = repo.veiculos.get(self.con, doc["veiculo_id"]) if doc.get("veiculo_id") else {}
         empresa = dict(self.con.execute("SELECT * FROM empresa WHERE id=1").fetchone())
-        html = printing.render_documento(
-            doc, empresa, cliente, veiculo,
-            gerado_em=datetime.now().strftime("%d/%m/%Y às %H:%M"))
+        html = renderer(doc, empresa, cliente, veiculo, gerado_em=datetime.now().strftime("%d/%m/%Y às %H:%M"))
         return doc, html
 
     @_api
     def print_documento(self, did):
-        doc, html = self._render(did)
+        doc, html = self._render(did, printing.render_documento)
+        return {"html": html, "numero": doc["numero"]}
+
+    @_api
+    def print_recebimento(self, did):
+        doc, html = self._render(did, printing.render_recebimento)
         return {"html": html, "numero": doc["numero"]}
 
     # ----------------------------------------------------------------- clientes

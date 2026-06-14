@@ -289,7 +289,7 @@ function cadastrarCidade(nome, onDone) {
 
 /* ----------------------------------------------------------------- router */
 function setActive(view) { document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("active", a.dataset.view === view)); const cb = document.getElementById("btn-config"); if (cb) cb.classList.toggle("active", view === "config"); }
-const VIEWS = { dashboard: viewDashboard, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos };
+const VIEWS = { dashboard: viewDashboard, orcamentos: viewOrcamentos, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos };
 async function setView(view) { setActive(view); try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
 
 /* ----------------------------------------------------------------- dashboard */
@@ -351,7 +351,7 @@ async function viewDashboard() {
   render(`
     <div class="between dash-head">
       <div><h1 class="page-title">${saudacao()}${primeiroNome ? ", " + esc(primeiroNome) : ""}! 👋</h1><p class="page-sub">${hojeExtenso()}</p></div>
-      <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Nova Pessoa</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Novo Documento</span></button></div>
+      <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Nova Pessoa</span></button><button class="btn" id="no">${ic("doc", 16)}<span>Novo Orçamento</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Nova O.S.</span></button></div>
     </div>
     <div class="cards kpis">
       ${kpi("Faturamento do mês", money(d.faturamento_mes), "dollar", "#16a34a", "#dcfce7", "Total em OS: " + money(d.faturamento_total))}
@@ -371,34 +371,68 @@ async function viewDashboard() {
   const legend = main().querySelector("#legend");
   segs.forEach(s => legend.appendChild(h(`<div class="leg-row"><span class="leg-dot" style="background:${s.color}"></span><span class="leg-label">${esc(s.label)}</span><b>${s.value}</b></div>`)));
   const rec = main().querySelector("#recent");
-  if (!d.recentes.length) rec.appendChild(emptyState("file", "Nenhum documento ainda", "Comece criando um orçamento ou ordem de serviço.", "Novo Documento", () => openDocForm()));
-  else renderDocsList(rec, d.recentes);
+  if (!d.recentes.length) rec.appendChild(emptyState("file", "Nenhum documento ainda", "Comece criando um orçamento ou ordem de serviço.", "Nova O.S.", () => openOS(null)));
+  else renderDocsList(rec, d.recentes, viewDashboard);
   main().querySelector("#vt").onclick = () => setView("documentos");
-  main().querySelector("#nd").onclick = () => openDocForm();
+  main().querySelector("#nd").onclick = () => openOS(null);
+  main().querySelector("#no").onclick = () => formOrcamento(null);
   main().querySelector("#nc").onclick = () => formCliente(null);
 }
 
-/* ----------------------------------------------------------------- documentos (kanban + lista) */
+/* ----------------------------------------------------------------- orçamentos (CRUD próprio) */
+async function viewOrcamentos() {
+  render(`<div class="between"><div><h1 class="page-title">Orçamentos</h1><p class="page-sub">Propostas comerciais</p></div>
+    <button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Orçamento</span></button></div>
+    <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, pessoa ou placa..."></div></div>
+    <div id="lista" class="mt"></div>`);
+  main().querySelector("#novo").onclick = () => formOrcamento(null);
+  const q = main().querySelector("#q");
+  async function reload() {
+    const docs = await api("list_documentos", { tipo: "orcamento", q: q.value.trim() });
+    const lst = main().querySelector("#lista"); lst.innerHTML = "";
+    if (!docs.length) { lst.appendChild(emptyState("file", "Nenhum orçamento", "Crie um orçamento e, ao aprovar, efetive-o em Ordem de Serviço.", "Novo Orçamento", () => formOrcamento(null))); return; }
+    const list = h(`<div class="list-rows"></div>`);
+    docs.forEach(d => {
+      const prio = d.prioridade || "Normal";
+      const r = h(`<div class="list-row"><div class="grow">
+        <div style="font-weight:700">${esc(d.numero)} <span class="badge ${statusClass(d.status)}">${esc(d.status)}</span> ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}</div>
+        <div class="small muted">${esc(d.cliente_nome || "-")} · ${esc(d.veiculo_placa || "-")} · ${fmtDate(d.data_abertura)}</div></div>
+        <span class="money">${money(d.total)}</span><div class="acts"></div></div>`);
+      const a = r.querySelector(".acts");
+      a.appendChild(btn("", "eye", () => printPreview(d.id)));
+      a.appendChild(btn("", "edit", () => formOrcamento(d.id)));
+      if (!["Aprovado", "Recusado", "Cancelado"].includes(d.status)) a.appendChild(btn("", "repeat", () => efetivarOrcamento(d)));
+      a.appendChild(btn("", "trash", () => delDoc(d.id, viewOrcamentos), "btn-danger"));
+      list.appendChild(r);
+    });
+    lst.appendChild(list); injectIcons(lst);
+  }
+  q.addEventListener("input", reload);
+  reload();
+}
+
+/* ----------------------------------------------------------------- O.S. (kanban + lista) */
 async function viewDocumentos() {
   const mode = vmode("docs", "kanban");
   render(`<div class="between"><div><h1 class="page-title">Ordens de Serviço</h1><p class="page-sub">Quadro de acompanhamento</p></div>
-    <div class="row"><span id="vt"></span><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Documento</span></button></div></div>
+    <div class="row"><span id="vt"></span><button class="btn" id="fat">${ic("dollar", 16)}<span>Lançar faturada</span></button><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Nova O.S.</span></button></div></div>
     <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, pessoa ou placa..."></div></div>
     <div id="board" class="mt"></div>`);
   main().querySelector("#vt").appendChild(viewToggle("docs", mode,
     [{ v: "kanban", icon: "columns", title: "Quadro" }, { v: "list", icon: "list", title: "Lista" }], () => viewDocumentos()));
-  main().querySelector("#novo").onclick = () => openDocForm();
+  main().querySelector("#novo").onclick = () => openOS(null);
+  main().querySelector("#fat").onclick = () => openOS(null, { faturada: true });
   const q = main().querySelector("#q");
   async function reload() {
-    const docs = await api("list_documentos", { q: q.value.trim() });
+    const docs = await api("list_documentos", { tipo: "os", q: q.value.trim() });
     const board = main().querySelector("#board"); board.innerHTML = "";
-    if (!docs.length) { board.appendChild(emptyState("file", "Nenhum documento encontrado", "Crie um novo orçamento ou ordem de serviço.", "Novo Documento", () => openDocForm())); return; }
+    if (!docs.length) { board.appendChild(emptyState("file", "Nenhuma O.S. encontrada", "Abra uma nova ordem de serviço.", "Nova O.S.", () => openOS(null))); return; }
     if (mode === "list") renderDocsList(board, docs); else renderKanban(board, docs);
   }
   q.addEventListener("input", reload);
   reload();
 }
-function renderDocsList(board, docs) {
+function renderDocsList(board, docs, onReload) {
   const list = h(`<div class="list-rows"></div>`);
   docs.forEach(d => {
     const prio = d.prioridade || "Normal";
@@ -410,23 +444,21 @@ function renderDocsList(board, docs) {
     a.appendChild(btn("", "eye", () => printPreview(d.id)));
     a.appendChild(btn("", "edit", () => openDocForm(d.id)));
     a.appendChild(btn("", "printer", () => printDocumento(d.id)));
-    a.appendChild(btn("", "trash", () => delDoc(d.id), "btn-danger"));
+    a.appendChild(btn("", "trash", () => delDoc(d.id, onReload), "btn-danger"));
     list.appendChild(r);
   });
   board.appendChild(list); injectIcons(board);
 }
+const OS_COLUNAS = [["Aberta", "Aberta"], ["Em Execução", "Em Execução"], ["Concluída", "Aguard. Faturamento"], ["Entregue", "Faturada"], ["Cancelada", "Cancelada"]];
 function renderKanban(board, docs) {
-  const colunas = B.kanban_colunas || B.kanban_os_status;
-  const cols = [{ key: "orcamentos", title: "Orçamentos", match: d => d.tipo === "orcamento" && !["Aprovado", "Recusado", "Cancelado"].includes(d.status) }]
-    .concat(colunas.map(s => ({ key: s, title: s, match: d => d.tipo === "os" && d.status === s })));
   const wrap = h(`<div class="kanban"></div>`);
-  cols.forEach(col => {
-    const items = docs.filter(col.match);
-    const c = h(`<div class="kcol" data-col="${esc(col.key)}"><div class="kcol-head"><span>${esc(col.title)}</span><span class="cnt">${items.length}</span></div></div>`);
+  OS_COLUNAS.forEach(([status, title]) => {
+    const items = docs.filter(d => d.status === status);
+    const c = h(`<div class="kcol" data-col="${esc(status)}"><div class="kcol-head"><span>${esc(title)}</span><span class="cnt">${items.length}</span></div></div>`);
     items.forEach(d => c.appendChild(kcard(d)));
     c.addEventListener("dragover", e => { e.preventDefault(); c.classList.add("drop"); });
     c.addEventListener("dragleave", () => c.classList.remove("drop"));
-    c.addEventListener("drop", e => { e.preventDefault(); c.classList.remove("drop"); onDropCard(col.key); });
+    c.addEventListener("drop", e => { e.preventDefault(); c.classList.remove("drop"); onDropCard(status); });
     wrap.appendChild(c);
   });
   board.appendChild(wrap); injectIcons(board);
@@ -434,237 +466,410 @@ function renderKanban(board, docs) {
 function kcard(d) {
   const prio = d.prioridade || "Normal";
   const card = h(`<div class="kcard pl-${esc(prio)}" draggable="true" data-id="${d.id}">
-    <div class="knum">${esc(d.veiculo_placa || "Sem veículo")} ${d.tipo === "os" ? '<span class="badge b-os">OS</span>' : '<span class="badge b-orc">Orçamento</span>'}</div>
+    <div class="knum">${esc(d.veiculo_placa || "Sem veículo")} <span class="badge b-os">OS</span></div>
     <div class="kmeta">${esc(((d.veiculo_marca || "") + " " + (d.veiculo_modelo || "")).trim() || "—")}<br>${esc(d.numero)} · ${esc(d.cliente_nome || "-")} · ${fmtDate(d.data_abertura)}</div>
     <div class="kfoot"><span class="money">${money(d.total)}</span><span class="kmini">
       ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}
-      <button data-a="ver" title="Ver">${ic("eye", 14)}</button><button data-a="edit" title="Editar">${ic("edit", 14)}</button><button data-a="del" title="Excluir">${ic("trash", 14)}</button></span></div>`);
-  card.addEventListener("dragstart", () => { card.classList.add("dragging"); window.__drag = { id: d.id, tipo: d.tipo, status: d.status }; });
+      <button data-a="ver" title="Ver">${ic("eye", 14)}</button><button data-a="edit" title="Abrir">${ic("edit", 14)}</button><button data-a="del" title="Excluir">${ic("trash", 14)}</button></span></div>`);
+  card.addEventListener("dragstart", () => { card.classList.add("dragging"); window.__drag = { id: d.id, status: d.status }; });
   card.addEventListener("dragend", () => card.classList.remove("dragging"));
   card.querySelector("[data-a=ver]").onclick = e => { e.stopPropagation(); printPreview(d.id); };
-  card.querySelector("[data-a=edit]").onclick = e => { e.stopPropagation(); openDocForm(d.id); };
+  card.querySelector("[data-a=edit]").onclick = e => { e.stopPropagation(); openOS(d.id); };
   card.querySelector("[data-a=del]").onclick = e => { e.stopPropagation(); delDoc(d.id); };
   return card;
 }
 async function onDropCard(colKey) {
   const drag = window.__drag; if (!drag) return; window.__drag = null;
-  const id = drag.id;
-  if (colKey === "orcamentos") { if (drag.tipo === "os") toast("Uma OS não retorna a orçamento.", "err"); return; }
-  if (drag.tipo === "orcamento") {
-    if (colKey === "Cancelada") {
-      if (!await confirma("Cancelar este orçamento?", { danger: true, ok: "Cancelar orçamento" })) return;
-      await api("set_status", { id, status: "Cancelado" });
-      toast("Orçamento cancelado", "ok");
-    } else {
-      if (!await confirma(`Converter este orçamento em Ordem de Serviço (coluna "${colKey}")?`)) return;
-      const os = await api("converter_os", id);
-      if (colKey !== "Aberta") await api("set_status", { id: os.id, status: colKey });
-      toast("Convertido em " + os.numero, "ok");
-    }
-  } else {
-    if (drag.status === colKey) return;
-    await api("set_status", { id, status: colKey });
-    toast("Status: " + colKey, "ok");
-  }
+  if (drag.status === colKey) return;
+  try { await api("set_status", { id: drag.id, status: colKey }); toast("Status: " + colKey, "ok"); } catch (e) { /* erro já avisado */ }
   viewDocumentos();
 }
-async function delDoc(id) { if (!await confirma("Excluir este documento? Esta ação não pode ser desfeita.", { danger: true, ok: "Excluir" })) return; await api("delete_documento", id); toast("Documento excluído", "ok"); viewDocumentos(); }
+async function delDoc(id, reload) { if (!await confirma("Excluir este documento? Esta ação não pode ser desfeita.", { danger: true, ok: "Excluir" })) return; await api("delete_documento", id); toast("Documento excluído", "ok"); (reload || viewDocumentos)(); }
+
+/* ----------------------------------------------------------------- editor de itens (form + grid) */
+function blankItem() { return { item_catalogo_id: null, descricao: "", tipo: "servico", quantidade: 1, valor_unitario: 0, desconto: 0 }; }
+/* Componente: um formulário em cima (combo + qtd + vlr + desconto + Adicionar) e um grid de leitura
+   abaixo. Gerencia o array `itens` e chama onChange() para recalcular os totais. Sem bug de resize
+   (o grid é fixo/somente leitura; a edição acontece no formulário). */
+function itensEditor(itens, cat, onChange) {
+  const wrap = h(`<div class="itens-editor">
+    <div class="item-form">
+      <div class="if-field if-prod"><label>Produto / Serviço</label><div class="if-combo"></div></div>
+      <div class="if-field"><label>Qtd</label><input class="if-qtd" value="1" inputmode="decimal"></div>
+      <div class="if-field"><label>Vlr Unitário</label><input class="if-vu money-in" placeholder="0,00"></div>
+      <div class="if-field"><label>Desconto</label><input class="if-de money-in" placeholder="0,00"></div>
+      <button class="btn btn-primary if-add">${ic("plus", 15)}<span>Adicionar</span></button>
+    </div>
+    <table class="itens-grid"><thead><tr><th>#</th><th>Produto / Serviço</th><th class="r">Qtd</th><th class="r">Vlr Unit.</th><th class="r">Desc.</th><th class="r">Líquido</th><th></th></tr></thead><tbody class="ig-body"></tbody></table>
+    <div class="ig-empty muted small">Nenhum item adicionado ainda.</div>
+  </div>`);
+  const comboBox = wrap.querySelector(".if-combo");
+  const qtd = wrap.querySelector(".if-qtd"), vu = wrap.querySelector(".if-vu"), de = wrap.querySelector(".if-de");
+  const body = wrap.querySelector(".ig-body"), empty = wrap.querySelector(".ig-empty");
+  bindQtd(qtd); bindMoney(vu); bindMoney(de);
+  let pick = null;  // item de catálogo escolhido (se houver)
+  let combo;
+  const buildCombo = () => {
+    combo = comboText(cat, "", {
+      placeholder: "Digite ou selecione o produto/serviço", getLabel: c => c.nome, getSub: c => c.tipo,
+      onInput: () => { pick = null; },
+      onPick: c => { pick = c; vu.value = fmtMoney(c.preco); },
+    });
+    comboBox.innerHTML = ""; comboBox.appendChild(combo);
+  };
+  buildCombo();
+  const limpa = () => { buildCombo(); qtd.value = "1"; vu.value = ""; de.value = ""; pick = null; combo._input.focus(); };
+  function adicionar() {
+    const desc = combo._value();
+    if (!desc) { toast("Informe o produto/serviço", "err"); return; }
+    itens.push({ item_catalogo_id: pick ? pick.id : null, descricao: desc, tipo: pick ? pick.tipo : "servico",
+      quantidade: num(qtd.value) || 1, valor_unitario: num(vu.value), desconto: num(de.value) });
+    limpa(); renderGrid(); onChange();
+  }
+  wrap.querySelector(".if-add").onclick = adicionar;
+  de.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); adicionar(); } });
+  function loadForEdit(idx) {
+    const it = itens[idx]; itens.splice(idx, 1); renderGrid(); onChange();
+    buildCombo(); combo._input.value = it.descricao || ""; pick = it.item_catalogo_id ? cat.find(c => c.id === it.item_catalogo_id) || null : null;
+    qtd.value = fmtQtd(it.quantidade); vu.value = fmtMoney(it.valor_unitario); de.value = fmtMoney(it.desconto); combo._input.focus();
+  }
+  function renderGrid() {
+    body.innerHTML = ""; empty.style.display = itens.length ? "none" : "";
+    itens.forEach((it, idx) => {
+      const liq = num(it.quantidade) * num(it.valor_unitario) - num(it.desconto);
+      const tr = h(`<tr><td class="c">${idx + 1}</td>
+        <td class="ig-desc">${esc(it.descricao || "")} ${it.tipo === "produto" ? '<span class="badge b-green">Produto</span>' : '<span class="badge b-orc">Serviço</span>'}</td>
+        <td class="r">${fmtQtd(it.quantidade)}</td><td class="r">${money(it.valor_unitario)}</td><td class="r">${money(it.desconto)}</td>
+        <td class="r"><b>${money(liq)}</b></td>
+        <td class="r"><button class="ig-edit" title="Editar">${ic("edit", 14)}</button><button class="ig-del" title="Remover">${ic("trash", 14)}</button></td></tr>`);
+      tr.querySelector(".ig-edit").onclick = () => loadForEdit(idx);
+      tr.querySelector(".ig-del").onclick = () => { itens.splice(idx, 1); renderGrid(); onChange(); };
+      body.appendChild(tr);
+    });
+    injectIcons(body);
+  }
+  renderGrid();
+  return { el: wrap, render: renderGrid };
+}
 
 /* ----------------------------------------------------------------- documento form */
-function blankItem() { return { item_catalogo_id: null, descricao: "", tipo: "servico", quantidade: 1, valor_unitario: 0, desconto: 0 }; }
 function statusOptions(tipo, current) { return (tipo === "os" ? B.status_os : B.status_orcamento).map(s => `<option ${s === current ? "selected" : ""}>${s}</option>`).join(""); }
-async function openDocForm(id) {
-  setActive("documentos");
-  let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
-  const doc = id ? await api("get_documento", id) : { tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: today(),
-    cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, acrescimo: 0, itens: [], lataria: [],
-    forma_pagamento: "", prazo_execucao: "", validade: "", observacoes: B.empresa ? B.empresa.termos_padrao : "",
-    estado_geral: "", nivel_combustivel: "", obs_entrada: "", item_chave_principal: 0, item_chave_reserva: 0, item_documento: 0, item_manual: 0,
-    usuario_id: (CURRENT_USER && CURRENT_USER.id) || null };
-  const itens = (doc.itens && doc.itens.length ? doc.itens.map(i => ({ ...i })) : [blankItem()]);
-  const latMap = {}; (doc.lataria || []).forEach(p => latMap[p.peca] = p.estado);
-  const respNome = doc.usuario_nome || (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "—";
-
-  render(`
-    <div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
-      <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Documento</h1><p class="page-sub" style="margin:0">Preencha os dados</p></div></div>
-
-    <div class="card mt"><h3 class="sec-title">Dados Principais</h3>
-      <div class="grid3">
-        <div class="field"><label>Tipo</label><div id="c_tipo"></div></div>
-        <div class="field"><label>Status</label><div id="c_status"></div></div>
-        <div class="field"><label>Prioridade</label><div id="c_prio"></div></div>
-      </div>
-      <div class="grid3">
-        <div class="field"><label>Data de Abertura</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
-        <div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
-        <div class="field"><label>Veículo</label><div id="c_vei"></div></div>
-      </div>
-      <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
-        <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
-    </div>
-
-    <div class="card mt"><div class="between"><h3 class="sec-title">Itens</h3>
-      <button class="btn btn-sm" id="add-item">${ic("plus", 15)}<span>Adicionar Item</span></button></div>
-      <table class="itens"><thead><tr><th style="width:40%">Produto / Serviço</th><th>Qtd</th><th>Vlr Bruto</th><th>Desconto</th><th>Vlr Líquido</th><th></th></tr></thead>
-      <tbody id="itens-body"></tbody></table>
-      <hr class="sep">
-      <div class="tot-line"><span class="muted">Serviços (subtotal)</span><b id="t_sub">R$ 0,00</b></div>
-      <div class="tot-line"><span class="muted">Desconto geral</span><input id="f_desc" class="money-in" style="width:150px;text-align:right" value="${doc.desconto_geral || 0}"></div>
-      <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
-      <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div>
-    </div>
-
-    <div class="card mt" id="checklist-card"><h3 class="sec-title">Checklist de Entrada</h3>
-      <div class="muted small" style="margin-bottom:6px">Lataria (marque OK ou Avaria)</div>
-      <div class="lataria" id="lataria"></div>
-      <div class="grid2 mt">
-        <div class="field"><label>Estado Geral</label><div id="c_estado"></div></div>
-        <div class="field"><label>Nível de Combustível</label><div class="chips" id="nivel"></div></div>
-      </div>
-      <div class="field"><label>Itens Entregues</label><div class="checks">
-        <label><input type="checkbox" id="c_chave" ${doc.item_chave_principal ? "checked" : ""}> Chave Principal</label>
-        <label><input type="checkbox" id="c_reserva" ${doc.item_chave_reserva ? "checked" : ""}> Chave Reserva</label>
-        <label><input type="checkbox" id="c_doc" ${doc.item_documento ? "checked" : ""}> Documento</label>
-        <label><input type="checkbox" id="c_manual" ${doc.item_manual ? "checked" : ""}> Manual</label>
-      </div></div>
-      <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div>
-    </div>
-
-    <div class="card mt"><h3 class="sec-title">Condições Comerciais</h3>
-      <div class="grid3">
-        <div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
-        <div class="field"><label>Prazo de Execução</label><input id="f_prazo" value="${esc(doc.prazo_execucao || "")}"></div>
-        <div class="field"><label>Validade do Orçamento</label><input id="f_val" value="${esc(doc.validade || "")}"></div>
-      </div>
-      <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div>
-    </div>
-
-    <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancel">Cancelar</button>
-      <button class="btn btn-primary" id="salvar">${ic("save", 16)}<span>Salvar Documento</span></button></div>`);
-
-  // dropdowns customizados (Tipo / Status / Prioridade / Estado Geral / Forma de Pagamento)
-  const checklistCard = main().querySelector("#checklist-card");
-  const toggleChecklist = tipo => { checklistCard.style.display = tipo === "os" ? "" : "none"; };
-  const statusBox = main().querySelector("#c_status");
-  let statusCombo;
-  const buildStatus = (tipo, current) => {
-    statusBox.innerHTML = "";
-    const lista = tipo === "os" ? B.status_os : B.status_orcamento;
-    statusCombo = selectCombo(lista, current || lista[0], null);
-    statusBox.appendChild(statusCombo);
-  };
-  const tipoCombo = selectCombo([{ value: "orcamento", label: "Orçamento" }, { value: "os", label: "Ordem de Serviço" }],
-    doc.tipo, t => { buildStatus(t, ""); toggleChecklist(t); });
-  main().querySelector("#c_tipo").appendChild(tipoCombo);
-  buildStatus(doc.tipo, doc.status);
-  toggleChecklist(doc.tipo);
-  const prioCombo = selectCombo(B.prioridades, doc.prioridade || "Normal", null);
-  main().querySelector("#c_prio").appendChild(prioCombo);
-  const estadoCombo = selectCombo(["—"].concat(B.estado_geral), doc.estado_geral || "—", null);
-  main().querySelector("#c_estado").appendChild(estadoCombo);
-  const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null);
-  main().querySelector("#c_pag").appendChild(pagCombo);
-
-  // cliente + veículo (veículo SEMPRE amarrado ao cliente: o seletor de veículo mostra só os do cliente)
+/* seletor Pessoa + Veículo (veículo amarrado à pessoa) — reutilizado nos forms de documento */
+function pickerPessoaVeiculo(cliBox, veiBox, clientes, veiculos, cliId, veiId) {
   let cliCombo, veiCombo;
-  const filtraVeiculos = cid => {
+  const filtra = cid => {
     const lista = cid ? veiculos.filter(v => String(v.cliente_id) === String(cid)) : veiculos.slice();
     veiCombo._setItems(lista);
     const cur = veiCombo._value();
     if (cur && cid && !lista.some(v => String(v.id) === String(cur))) veiCombo._setValue(null);
   };
-  cliCombo = comboSelect(clientes, doc.cliente_id || null, {
+  cliCombo = comboSelect(clientes, cliId || null, {
     placeholder: "Buscar/selecionar pessoa...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || c.telefone || "",
-    onSelect: cid => filtraVeiculos(cid),
-    onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); cliCombo._setItems(clientes); cliCombo._setValue(c.id); filtraVeiculos(c.id); } }),
+    onSelect: cid => filtra(cid),
+    onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); cliCombo._setItems(clientes); cliCombo._setValue(c.id); filtra(c.id); } }),
   });
-  main().querySelector("#c_cli").appendChild(cliCombo);
-  veiCombo = comboSelect(doc.cliente_id ? veiculos.filter(v => String(v.cliente_id) === String(doc.cliente_id)) : veiculos.slice(), doc.veiculo_id || null, {
+  cliBox.appendChild(cliCombo);
+  veiCombo = comboSelect(cliId ? veiculos.filter(v => String(v.cliente_id) === String(cliId)) : veiculos.slice(), veiId || null, {
     placeholder: "Buscar/selecionar veículo...", getLabel: v => v.placa, getSub: v => `${v.marca || ""} ${v.modelo || ""}`.trim(),
     onSelect: vid => { const v = veiculos.find(x => String(x.id) === String(vid)); if (v && v.cliente_id) cliCombo._setValue(v.cliente_id); },
-    onCreate: txt => formVeiculo(null, clientes, { prefill: { placa: txt.toUpperCase(), cliente_id: cliCombo._value() || null }, onSaved: v => { veiculos.push(v); if (v.cliente_id) cliCombo._setValue(v.cliente_id); filtraVeiculos(cliCombo._value()); veiCombo._setValue(v.id); } }),
+    onCreate: txt => formVeiculo(null, clientes, { prefill: { placa: txt.toUpperCase(), cliente_id: cliCombo._value() || null }, onSaved: v => { veiculos.push(v); if (v.cliente_id) cliCombo._setValue(v.cliente_id); filtra(cliCombo._value()); veiCombo._setValue(v.id); } }),
   });
-  main().querySelector("#c_vei").appendChild(veiCombo);
+  veiBox.appendChild(veiCombo);
+  return { cliCombo, veiCombo };
+}
 
-  // itens
-  function renderItens() {
-    const body = main().querySelector("#itens-body"); body.innerHTML = "";
-    itens.forEach((it, idx) => {
-      const tr = h(`<tr><td class="i-cell"></td>
-        <td><input class="i-qtd" style="width:64px;text-align:right" value="${fmtQtd(it.quantidade)}"></td>
-        <td><input class="i-vu money-in" style="width:96px;text-align:right" value="${fmtMoney(it.valor_unitario)}"></td>
-        <td><input class="i-de money-in" style="width:96px;text-align:right" value="${fmtMoney(it.desconto)}"></td>
-        <td><b class="i-liq">${money(num(it.quantidade) * num(it.valor_unitario) - num(it.desconto))}</b></td>
-        <td><button class="btn btn-sm btn-danger i-del">${ic("trash", 15)}</button></td></tr>`);
-      const combo = comboText(cat, it.descricao || "", {
-        placeholder: "Digite o produto/serviço", getLabel: c => c.nome, getSub: c => c.tipo,
-        onInput: v => it.descricao = v,
-        onPick: c => { it.item_catalogo_id = c.id; it.tipo = c.tipo; it.descricao = c.nome; it.valor_unitario = c.preco; tr.querySelector(".i-vu").value = fmtMoney(c.preco); recalc(); upRow(tr, it); },
-      });
-      tr.querySelector(".i-cell").appendChild(combo);
-      const q = tr.querySelector(".i-qtd"); bindQtd(q); q.oninput = () => { it.quantidade = q.value; recalc(); upRow(tr, it); };
-      const vu = tr.querySelector(".i-vu"); bindMoney(vu); vu.oninput = () => { it.valor_unitario = vu.value; it.item_catalogo_id = null; recalc(); upRow(tr, it); };
-      const de = tr.querySelector(".i-de"); bindMoney(de); de.oninput = () => { it.desconto = de.value; recalc(); upRow(tr, it); };
-      tr.querySelector(".i-del").onclick = () => { itens.splice(idx, 1); if (!itens.length) itens.push(blankItem()); renderItens(); recalc(); };
-      body.appendChild(tr);
-    });
-  }
-  function upRow(tr, it) { tr.querySelector(".i-liq").textContent = money(num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)); }
-  function recalc() {
+/* picker de orçamento (efetivar/importar). onPick recebe o documento completo do orçamento. */
+async function escolherOrcamento(onPick) {
+  const orcs = (await api("list_documentos", { tipo: "orcamento" })).filter(o => !["Recusado", "Cancelado"].includes(o.status));
+  const m = h(`<div class="modal" style="width:560px"><button class="close">×</button><h3>Importar orçamento</h3>
+    <p class="muted" style="margin:0 0 12px">Selecione um orçamento para usar como referência.</p>
+    <div id="ol" style="max-height:52vh;overflow:auto"></div></div>`);
+  const bg = openModal(m); m.querySelector(".close").onclick = () => bg.remove();
+  const ol = m.querySelector("#ol");
+  if (!orcs.length) { ol.appendChild(h(`<div class="empty">Nenhum orçamento disponível.</div>`)); return; }
+  const list = h(`<div class="list-rows"></div>`);
+  orcs.forEach(o => {
+    const r = h(`<div class="list-row" style="cursor:pointer"><div class="grow"><div style="font-weight:700">${esc(o.numero)} <span class="badge ${statusClass(o.status)}">${esc(o.status)}</span></div>
+      <div class="small muted">${esc(o.cliente_nome || "-")} · ${esc(o.veiculo_placa || "-")} · ${fmtDate(o.data_abertura)}</div></div><span class="money">${money(o.total)}</span></div>`);
+    r.onclick = async () => { const full = await api("get_documento", o.id); bg.remove(); onPick(full); };
+    list.appendChild(r);
+  });
+  ol.appendChild(list); injectIcons(ol);
+}
+
+/* compat: dispatcher antigo. Abre o form conforme o tipo do documento. */
+function openDocForm(id) {
+  if (!id) return openOS(null);
+  api("get_documento", id).then(d => { if (d && d.tipo === "orcamento") formOrcamento(id); else openOS(id); });
+}
+
+/* mapeia itens do orçamento -> linhas de itens */
+function itensDoOrcamento(orc) {
+  return (orc.itens || []).map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo,
+    quantidade: it.quantidade, valor_unitario: it.valor_unitario, desconto: it.desconto }));
+}
+
+/* ----------------------------------------------------------------- ORÇAMENTO (CRUD próprio) */
+async function formOrcamento(id, opts) {
+  opts = opts || {};
+  setActive("orcamentos");
+  let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
+  const doc = id ? await api("get_documento", id) : Object.assign({
+    tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: today(),
+    cliente_id: "", veiculo_id: "", desconto_geral: 0, acrescimo: 0, itens: [],
+    forma_pagamento: "", validade: "", observacoes: (B.empresa && B.empresa.termos_padrao) || "",
+    usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
+  }, opts.prefill || {});
+  const itens = (doc.itens || []).map(i => ({ ...i }));
+  render(`
+    <div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
+      <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Orçamento</h1><p class="page-sub" style="margin:0">Proposta comercial</p></div></div>
+    <div class="card mt"><h3 class="sec-title">Dados</h3>
+      <div class="grid3"><div class="field"><label>Data</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
+        <div class="field"><label>Status</label><div id="c_status"></div></div>
+        <div class="field"><label>Prioridade</label><div id="c_prio"></div></div></div>
+      <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
+        <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div></div>
+    <div class="card mt"><h3 class="sec-title">Itens</h3><div id="itens-box"></div>
+      <hr class="sep">
+      <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
+      <div class="tot-line"><span class="muted">Desconto geral</span><input id="f_desc" class="money-in" style="width:150px;text-align:right" value="${doc.desconto_geral || 0}"></div>
+      <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
+      <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
+    <div class="card mt"><h3 class="sec-title">Condições</h3>
+      <div class="grid2"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
+        <div class="field"><label>Validade</label><input id="f_val" value="${esc(doc.validade || "")}"></div></div>
+      <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div></div>
+    <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancel">Cancelar</button>
+      <div class="row">${id && !["Aprovado", "Recusado", "Cancelado"].includes(doc.status) ? `<button class="btn" id="efetivar">${ic("repeat", 16)}<span>Efetivar (criar O.S.)</span></button>` : ""}
+      <button class="btn btn-primary" id="salvar">${ic("save", 16)}<span>Salvar Orçamento</span></button></div></div>`);
+  const statusCombo = selectCombo(B.status_orcamento, doc.status || "Aberto", null); main().querySelector("#c_status").appendChild(statusCombo);
+  const prioCombo = selectCombo(B.prioridades, doc.prioridade || "Normal", null); main().querySelector("#c_prio").appendChild(prioCombo);
+  const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null); main().querySelector("#c_pag").appendChild(pagCombo);
+  const { cliCombo, veiCombo } = pickerPessoaVeiculo(main().querySelector("#c_cli"), main().querySelector("#c_vei"), clientes, veiculos, doc.cliente_id, doc.veiculo_id);
+  const recalc = () => {
     const sub = itens.reduce((a, it) => a + (num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)), 0);
     main().querySelector("#t_sub").textContent = money(sub);
     main().querySelector("#t_total").textContent = money(sub - num(val("#f_desc")) + num(val("#f_acr")));
-  }
-  main().querySelector("#add-item").onclick = () => { itens.push(blankItem()); renderItens(); };
-  const fd = main().querySelector("#f_desc"), fa = main().querySelector("#f_acr"); bindMoney(fd); bindMoney(fa); fd.oninput = recalc; fa.oninput = recalc;
-  renderItens(); recalc();
+  };
+  const ed = itensEditor(itens, cat, recalc); main().querySelector("#itens-box").appendChild(ed.el);
+  const fd = main().querySelector("#f_desc"), fa = main().querySelector("#f_acr"); bindMoney(fd); bindMoney(fa); fd.oninput = recalc; fa.oninput = recalc; recalc();
+  const payloadDe = () => ({ id: doc.id, tipo: "orcamento", status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: val("#f_data"),
+    usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
+    cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null,
+    desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
+    forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), validade: val("#f_val"), observacoes: val("#f_obs"),
+    itens: itens.map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo, quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })), lataria: [] });
+  main().querySelector("#back").onclick = () => setView("orcamentos");
+  main().querySelector("#cancel").onclick = () => setView("orcamentos");
+  main().querySelector("#salvar").onclick = async () => {
+    const saved = await api("save_documento", payloadDe()); toast("Orçamento salvo: " + saved.numero, "ok");
+    if (opts.onSaved) opts.onSaved(saved); else setView("orcamentos");
+  };
+  // efetivar do form: salva as edições pendentes primeiro, depois efetiva o orçamento salvo
+  const ef = main().querySelector("#efetivar");
+  if (ef) ef.onclick = async () => { const saved = await api("save_documento", payloadDe()); efetivarOrcamento(saved); };
+}
 
-  // lataria
+/* efetivar um orçamento -> cria a O.S. (Aberta) com os itens carregados para o recebimento.
+   O orçamento só é marcado 'Aprovado' quando a O.S. é efetivamente salva (ver openOS.salvar). */
+async function efetivarOrcamento(orc) {
+  if (!await confirma(`Efetivar o orçamento ${esc(orc.numero)} e criar uma Ordem de Serviço?`, { ok: "Efetivar" })) return;
+  const full = orc.itens ? orc : await api("get_documento", orc.id);
+  openOS(null, { prefill: {
+    cliente_id: full.cliente_id, veiculo_id: full.veiculo_id, origem_orcamento_id: full.id,
+    desconto_geral: full.desconto_geral, acrescimo: full.acrescimo, forma_pagamento: full.forma_pagamento,
+    observacoes: full.observacoes, itens: itensDoOrcamento(full),
+  }, fromOrcamento: full.numero });
+}
+
+/* ----------------------------------------------------------------- O.S. (fluxo guiado por estado) */
+async function openOS(id, opts) {
+  opts = opts || {};
+  setActive("documentos");
+  let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
+  const doc = id ? await api("get_documento", id) : Object.assign({
+    tipo: "os", status: opts.faturada ? "Entregue" : "Aberta", prioridade: "Normal", data_abertura: today(),
+    cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, acrescimo: 0, itens: [], lataria: [],
+    forma_pagamento: "", observacoes: "", estado_geral: "", nivel_combustivel: "", obs_entrada: "", ocorrencia: "",
+    parecer_mecanico: "", mecanico: "", faturado_em: "", origem_orcamento_id: null,
+    item_chave_principal: 0, item_chave_reserva: 0, item_documento: 0, item_manual: 0,
+    usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
+  }, opts.prefill || {});
+  const st = doc.status;
+  const itens = (doc.itens || []).map(i => ({ ...i }));
+  const latMap = {}; (doc.lataria || []).forEach(p => latMap[p.peca] = p.estado);
+  let nivelSel = doc.nivel_combustivel || "";
+  const isAberta = st === "Aberta", isExec = st === "Em Execução", isConcl = st === "Concluída",
+        isFat = st === "Entregue", isCancel = st === "Cancelada";
+  const verItens = !isAberta;                 // serviços a partir de Em Execução
+  const verParecer = isConcl || isFat;
+  const verFatur = isConcl || isFat;
+  const respNome = doc.usuario_nome || (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "—";
+  const titulo = id ? "Ordem de Serviço" : (opts.faturada ? "Nova O.S. (faturada)" : "Nova Ordem de Serviço");
+  const passos = [["Aberta", "Recebimento"], ["Em Execução", "Execução"], ["Concluída", "Aguard. Faturamento"], ["Entregue", "Faturada"]];
+  const idxAtual = passos.findIndex(p => p[0] === st);
+
+  render(`
+    <div class="between"><div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
+      <div><h1 class="page-title" style="font-size:24px">${titulo}${id ? " " + esc(doc.numero) : ""}</h1>
+        <p class="page-sub" style="margin:0">${esc(doc.cliente_nome || "Nova")} ${doc.veiculo_placa ? "· " + esc(doc.veiculo_placa) : ""}${opts.fromOrcamento ? " · do orçamento " + esc(opts.fromOrcamento) : ""}</p></div></div>
+      <span class="badge ${statusClass(st)}" style="align-self:center;font-size:13px;padding:6px 12px">${esc(st)}</span></div>
+
+    <div class="wiz-steps mt" id="osstep">${passos.map((p, i) => `<span class="wiz-pill ${i === idxAtual ? "on" : i < idxAtual ? "done" : ""}">${i + 1}. ${esc(p[1])}</span>`).join("")} ${isCancel ? '<span class="wiz-pill" style="background:#fee2e2;color:#991b1b">Cancelada</span>' : ""}</div>
+
+    <div class="card mt"><div class="between"><h3 class="sec-title" style="margin:0">Dados do Recebimento</h3>
+      ${(!id && !opts.faturada) || (id && verItens && !isFat) ? `<button class="btn btn-sm" id="importar">${ic("repeat", 15)}<span>Importar orçamento</span></button>` : ""}</div>
+      <div class="grid3 mt"><div class="field"><label>Data de Abertura</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
+        <div class="field"><label>Prioridade</label><div id="c_prio"></div></div>
+        <div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div></div>
+      <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
+        <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
+      <div class="grid2"><div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div></div>
+
+    <div class="card mt"><h3 class="sec-title">Checklist de Entrada</h3>
+      <div class="muted small" style="margin-bottom:8px">Marque o estado de cada item da lataria.</div>
+      <div class="checklist-grid" id="lataria"></div>
+      <div class="grid2 mt"><div class="field"><label>Estado Geral</label><div id="c_estado"></div></div>
+        <div class="field"><label>Nível de Combustível</label><div class="chips" id="nivel"></div></div></div>
+      <div class="field"><label>Itens Entregues</label><div class="checks">
+        <label><input type="checkbox" id="c_chave" ${doc.item_chave_principal ? "checked" : ""}> Chave Principal</label>
+        <label><input type="checkbox" id="c_reserva" ${doc.item_chave_reserva ? "checked" : ""}> Chave Reserva</label>
+        <label><input type="checkbox" id="c_doc" ${doc.item_documento ? "checked" : ""}> Documento</label>
+        <label><input type="checkbox" id="c_manual" ${doc.item_manual ? "checked" : ""}> Manual</label></div></div></div>
+
+    <div class="card mt"><h3 class="sec-title">Ocorrência e Observações</h3>
+      <div class="field"><label>Ocorrência (relato do cliente)</label><textarea id="f_ocor" placeholder="Ex: barulho na suspensão ao passar em lombadas...">${esc(doc.ocorrencia || "")}</textarea></div>
+      <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div></div>
+
+    <div class="card mt" id="card-itens" style="${verItens ? "" : "display:none"}"><h3 class="sec-title">Serviços e Produtos</h3><div id="itens-box"></div>
+      <hr class="sep">
+      <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
+      <div class="tot-line"><span class="muted">Desconto geral</span><input id="f_desc" class="money-in" style="width:150px;text-align:right" value="${doc.desconto_geral || 0}"></div>
+      <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
+      <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
+
+    <div class="card mt" id="card-parecer" style="${verParecer ? "" : "display:none"}"><h3 class="sec-title">Parecer Técnico</h3>
+      <div class="field"><label>Mecânico responsável</label><input id="f_mec" value="${esc(doc.mecanico || "")}" placeholder="Nome do mecânico (opcional)"></div>
+      <div class="field"><label>Parecer do mecânico</label><textarea id="f_parecer" placeholder="O que foi diagnosticado/executado (opcional)...">${esc(doc.parecer_mecanico || "")}</textarea></div></div>
+
+    <div class="card mt" id="card-fatur" style="${verFatur ? "" : "display:none"}"><h3 class="sec-title">Faturamento</h3>
+      <div class="grid3"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
+        <div class="field"><label>Data de Faturamento</label><input type="date" id="f_fatdata" value="${esc((doc.faturado_em || "").slice(0, 10) || doc.data_abertura || today())}"></div></div>
+      <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div></div>
+
+    <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancelar">${ic("back", 15)}<span>Voltar</span></button>
+      <div class="row" id="acoes"></div></div>`);
+
+  const prioCombo = selectCombo(B.prioridades, doc.prioridade || "Normal", null); main().querySelector("#c_prio").appendChild(prioCombo);
+  const estadoCombo = selectCombo(["—"].concat(B.estado_geral), doc.estado_geral || "—", null); main().querySelector("#c_estado").appendChild(estadoCombo);
+  const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null); main().querySelector("#c_pag").appendChild(pagCombo);
+  const { cliCombo, veiCombo } = pickerPessoaVeiculo(main().querySelector("#c_cli"), main().querySelector("#c_vei"), clientes, veiculos, doc.cliente_id, doc.veiculo_id);
+
+  // checklist repaginado
   const latBox = main().querySelector("#lataria");
   B.pecas.forEach(peca => {
     const cur = latMap[peca] || "";
-    const row = h(`<div class="lat-row"><span class="nm">${esc(peca)}</span>
+    const row = h(`<div class="cl-item"><span class="cl-nm">${esc(peca)}</span>
       <span class="seg"><button class="ok ${cur === "OK" ? "on" : ""}">OK</button><button class="av ${cur === "Avaria" ? "on" : ""}">Avaria</button></span></div>`);
     const ok = row.querySelector(".ok"), av = row.querySelector(".av");
-    ok.onclick = () => { latMap[peca] = latMap[peca] === "OK" ? "" : "OK"; ok.classList.toggle("on", latMap[peca] === "OK"); av.classList.remove("on"); };
-    av.onclick = () => { latMap[peca] = latMap[peca] === "Avaria" ? "" : "Avaria"; av.classList.toggle("on", latMap[peca] === "Avaria"); ok.classList.remove("on"); };
+    ok.onclick = () => { latMap[peca] = latMap[peca] === "OK" ? "" : "OK"; ok.classList.toggle("on", latMap[peca] === "OK"); av.classList.remove("on"); row.classList.remove("avaria"); if (latMap[peca] === "OK") row.classList.add("okk"); else row.classList.remove("okk"); };
+    av.onclick = () => { latMap[peca] = latMap[peca] === "Avaria" ? "" : "Avaria"; av.classList.toggle("on", latMap[peca] === "Avaria"); ok.classList.remove("on"); row.classList.remove("okk"); row.classList.toggle("avaria", latMap[peca] === "Avaria"); };
+    if (cur === "Avaria") row.classList.add("avaria"); else if (cur === "OK") row.classList.add("okk");
     latBox.appendChild(row);
   });
-  const nivBox = main().querySelector("#nivel"); let nivelSel = doc.nivel_combustivel || "";
+  const nivBox = main().querySelector("#nivel");
   B.niveis_combustivel.forEach(n => {
     const c = h(`<span class="chip ${n === nivelSel ? "on" : ""}">${n}</span>`);
     c.onclick = () => { nivelSel = nivelSel === n ? "" : n; nivBox.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x.textContent === nivelSel)); };
     nivBox.appendChild(c);
   });
 
-  main().querySelector("#back").onclick = () => setView("documentos");
-  main().querySelector("#cancel").onclick = () => setView("documentos");
-  main().querySelector("#salvar").onclick = async () => {
-    const payload = {
-      id: doc.id, tipo: tipoCombo._value(), status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: val("#f_data"),
-      usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
-      cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
-      desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
-      forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: val("#f_prazo"), validade: val("#f_val"),
-      observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel, obs_entrada: val("#f_obsent"),
-      item_chave_principal: main().querySelector("#c_chave").checked ? 1 : 0,
-      item_chave_reserva: main().querySelector("#c_reserva").checked ? 1 : 0,
-      item_documento: main().querySelector("#c_doc").checked ? 1 : 0,
-      item_manual: main().querySelector("#c_manual").checked ? 1 : 0,
-      itens: itens.filter(it => (it.descricao || "").trim() || num(it.valor_unitario)).map(it => ({
-        item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo,
-        quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })),
-      lataria: B.pecas.map(p => ({ peca: p, estado: latMap[p] || "" })),
-    };
-    const saved = await api("save_documento", payload);
-    toast("Documento salvo: " + saved.numero, "ok"); setView("documentos");
+  // itens (serviços)
+  const recalc = () => {
+    const sub = itens.reduce((a, it) => a + (num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)), 0);
+    const ts = main().querySelector("#t_sub"); if (!ts) return;
+    ts.textContent = money(sub);
+    main().querySelector("#t_total").textContent = money(sub - num(val("#f_desc")) + num(val("#f_acr")));
   };
+  const ed = itensEditor(itens, cat, recalc); main().querySelector("#itens-box").appendChild(ed.el);
+  const fd = main().querySelector("#f_desc"), fa = main().querySelector("#f_acr"); bindMoney(fd); bindMoney(fa); fd.oninput = recalc; fa.oninput = recalc; recalc();
+
+  // payload do estado atual do formulário (com status escolhido)
+  const payloadDe = (status) => ({
+    id: doc.id, tipo: "os", status, prioridade: prioCombo._value(), data_abertura: val("#f_data"),
+    usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
+    cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
+    desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
+    forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: doc.prazo_execucao || "", validade: doc.validade || "",
+    observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel,
+    obs_entrada: val("#f_obsent"), ocorrencia: val("#f_ocor"), mecanico: val("#f_mec"), parecer_mecanico: val("#f_parecer"),
+    origem_orcamento_id: doc.origem_orcamento_id || null,
+    faturado_em: status === "Entregue" ? (val("#f_fatdata") || doc.data_abertura) : "",
+    item_chave_principal: main().querySelector("#c_chave").checked ? 1 : 0,
+    item_chave_reserva: main().querySelector("#c_reserva").checked ? 1 : 0,
+    item_documento: main().querySelector("#c_doc").checked ? 1 : 0,
+    item_manual: main().querySelector("#c_manual").checked ? 1 : 0,
+    itens: itens.map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo, quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })),
+    lataria: B.pecas.map(p => ({ peca: p, estado: latMap[p] || "" })),
+  });
+  const validaPessoa = () => { if (!cliCombo._value()) { toast("Selecione a pessoa", "err"); return false; } return true; };
+  const salvar = async (status, msg) => {
+    if (!validaPessoa()) return null;
+    const saved = await api("save_documento", payloadDe(status));
+    // só agora (O.S. realmente criada) o orçamento de origem é marcado como Aprovado
+    if (!id && doc.origem_orcamento_id) { try { await api("set_status", { id: doc.origem_orcamento_id, status: "Aprovado" }); } catch (e) {} }
+    toast(msg || ("O.S. salva: " + saved.numero), "ok"); return saved;
+  };
+
+  // ações por estágio
+  const acoes = main().querySelector("#acoes");
+  const addBtn = (label, icon, fn, cls) => { const b = btn(label, icon, fn, cls || ""); acoes.appendChild(b); return b; };
+  if (isAberta) {
+    addBtn("Comprovante de Recebimento", "printer", async () => { const s = await salvar(st); if (s) imprimirRecebimento(s.id); });
+    addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); });
+    addBtn("Iniciar Execução", "trending", async () => { const s = await salvar("Em Execução", "Em execução"); if (s) openOS(s.id); }, "btn-primary");
+  } else if (isExec) {
+    addBtn("Imprimir O.S.", "printer", async () => { const s = await salvar(st); if (s) printDocumento(s.id); });
+    addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); });
+    addBtn("Concluir Serviço", "trending", async () => { const s = await salvar("Concluída", "Aguardando faturamento"); if (s) openOS(s.id); }, "btn-primary");
+  } else if (isConcl) {
+    addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); });
+    addBtn("Faturar e Imprimir O.S.", "dollar", async () => {
+      if (!itens.length) { toast("Adicione ao menos um serviço antes de faturar.", "err"); return; }
+      if (!await confirma("Confirmar o faturamento desta O.S.?", { ok: "Faturar" })) return;
+      const s = await salvar("Entregue", "O.S. faturada"); if (s) { printDocumento(s.id); openOS(s.id); }
+    }, "btn-primary");
+  } else if (isFat) {
+    addBtn("Imprimir O.S.", "printer", async () => { const s = await salvar(st); if (s) printDocumento(s.id); });
+    addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); }, "btn-primary");
+  } else if (isCancel) {
+    addBtn("Reabrir O.S.", "repeat", async () => { if (!await confirma("Reabrir esta O.S. (volta para Aberta)?")) return; const s = await salvar("Aberta"); if (s) openOS(s.id); });
+  } else {
+    addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); }, "btn-primary");
+  }
+
+  main().querySelector("#back").onclick = () => setView("documentos");
+  main().querySelector("#cancelar").onclick = () => setView("documentos");
+  const imp = main().querySelector("#importar");
+  if (imp) imp.onclick = () => escolherOrcamento(orc => {
+    // regra: assume o cliente e o veículo do orçamento; os produtos são ADICIONADOS aos itens atuais
+    cliCombo._setValue(orc.cliente_id); if (orc.cliente_id) { const lista = veiculos.filter(v => String(v.cliente_id) === String(orc.cliente_id)); veiCombo._setItems(lista); }
+    veiCombo._setValue(orc.veiculo_id);
+    itensDoOrcamento(orc).forEach(it => itens.push(it)); ed.render(); recalc();
+    doc.origem_orcamento_id = orc.id;
+    toast("Orçamento " + orc.numero + " importado" + (verItens ? "" : " — os serviços aparecem ao iniciar a execução"), "ok");
+  });
 }
 
 /* ----------------------------------------------------------------- print */
 async function printDocumento(id) {
   const r = await api("print_documento", id);
+  const f = document.getElementById("print-frame"); f.srcdoc = r.html;
+  f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast("Falha ao imprimir", "err"); } };
+}
+async function imprimirRecebimento(id) {
+  const r = await api("print_recebimento", id);
   const f = document.getElementById("print-frame"); f.srcdoc = r.html;
   f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast("Falha ao imprimir", "err"); } };
 }

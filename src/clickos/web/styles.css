@@ -239,6 +239,38 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .pipe-bar{height:9px;background:#f1f5f9;border-radius:999px;overflow:hidden}
 .pipe-bar span{display:block;height:100%;border-radius:999px;transition:width .3s}
 
+/* editor de itens (form em cima + grid de leitura abaixo) */
+.item-form{display:grid;grid-template-columns:1fr 80px 130px 130px auto;gap:10px;align-items:end;
+  padding:14px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-bottom:14px}
+.item-form label{font-size:12px;font-weight:600;margin-bottom:4px;display:block}
+.item-form .if-add{height:40px;justify-content:center}
+.itens-grid{width:100%;table-layout:fixed;border-collapse:collapse}
+.itens-grid th{font-size:12px;color:var(--muted);text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-weight:600}
+.itens-grid td{padding:9px 8px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.itens-grid .r{text-align:right}
+.itens-grid .c{text-align:center}
+.itens-grid .ig-desc{white-space:normal}
+.itens-grid th:nth-child(1),.itens-grid td:nth-child(1){width:34px}
+.itens-grid th:nth-child(3),.itens-grid td:nth-child(3){width:64px}
+.itens-grid th:nth-child(4),.itens-grid td:nth-child(4){width:110px}
+.itens-grid th:nth-child(5),.itens-grid td:nth-child(5){width:96px}
+.itens-grid th:nth-child(6),.itens-grid td:nth-child(6){width:120px}
+.itens-grid th:nth-child(7),.itens-grid td:nth-child(7){width:78px}
+.itens-grid .ig-edit,.itens-grid .ig-del{border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px;cursor:pointer;color:#475569;margin-left:4px}
+.itens-grid .ig-edit:hover{background:#f3f4f6}
+.itens-grid .ig-del{color:var(--red);border-color:#fecaca}
+.itens-grid .ig-del:hover{background:#fef2f2}
+.ig-empty{padding:18px;text-align:center;border:1px dashed var(--line);border-radius:8px;margin-top:4px}
+@media(max-width:760px){.item-form{grid-template-columns:1fr 1fr}.item-form .if-prod{grid-column:1/-1}}
+
+/* checklist de entrada repaginado */
+.checklist-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+@media(max-width:820px){.checklist-grid{grid-template-columns:1fr}}
+.cl-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;transition:background .15s,border-color .15s}
+.cl-item .cl-nm{font-size:13px;font-weight:500}
+.cl-item.okk{border-color:#bbf7d0;background:#f0fdf4}
+.cl-item.avaria{border-color:#fecaca;background:#fef2f2}
+
 /* gráfico de barras (faturamento) — altura fixa, preenche a largura */
 .barchart{position:relative;display:flex;align-items:stretch;gap:6px;height:260px;margin-top:12px}
 .bc-col{flex:1;min-width:0;display:flex;flex-direction:column}
