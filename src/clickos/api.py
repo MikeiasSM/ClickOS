@@ -35,6 +35,12 @@ def _api(fn):
 class Api:
     def __init__(self, con):
         self.con = con
+        self.usuario = None  # sessão server-side do usuário autenticado: {id, login, is_suporte}
+
+    def _sessao(self):
+        if not self.usuario:
+            raise ValueError("Sessão expirada. Faça login novamente.")
+        return self.usuario
 
     def _win(self):
         # IMPORTANTE: não armazenar a janela como atributo de Api. O pywebview
@@ -278,22 +284,75 @@ class Api:
         user = repo.usuarios.autenticar(self.con, (payload or {}).get("login"), (payload or {}).get("senha"))
         if not user:
             raise ValueError("Login ou senha inválidos.")
+        # guarda a identidade no servidor (não confiar no cliente para autorização)
+        self.usuario = {"id": user["id"], "login": user["login"], "is_suporte": user["is_suporte"]}
         return user
 
     @_api
+    def logout(self):
+        self.usuario = None
+        return True
+
+    @_api
     def list_usuarios(self):
+        self._sessao()
         return repo.usuarios.list(self.con)
 
     @_api
     def save_usuario(self, payload):
+        sess = self._sessao()
         if payload.get("id"):
+            alvo = repo.usuarios.get(self.con, payload["id"])
+            if alvo and alvo.get("is_suporte") and not sess.get("is_suporte"):
+                raise ValueError("Apenas o SUPORTE pode editar a conta SUPORTE.")
             return repo.usuarios.update(self.con, payload["id"], payload, stamp=_stamp())
         return repo.usuarios.create(self.con, payload, stamp=_stamp())
 
     @_api
     def delete_usuario(self, uid):
+        self._sessao()
         repo.usuarios.delete(self.con, uid)
         return True
+
+    @_api
+    def reset_senha(self, payload):
+        """Redefine a senha de outro usuário para a padrão. A identidade do solicitante vem da
+        SESSÃO (não do cliente); valida-se a senha do solicitante e protege-se a conta SUPORTE."""
+        sess = self._sessao()
+        alvo_id = payload.get("alvo_id")
+        if alvo_id == sess["id"]:
+            raise ValueError("Para trocar a sua própria senha, edite o seu usuário.")
+        alvo = repo.usuarios.get(self.con, alvo_id)
+        if not alvo:
+            raise ValueError("Usuário não encontrado.")
+        if alvo.get("is_suporte") and not sess.get("is_suporte"):
+            raise ValueError("Apenas o SUPORTE pode redefinir a senha do SUPORTE.")
+        return repo.usuarios.reset_senha(self.con, alvo_id, sess["id"], payload.get("senha") or "")
+
+    @_api
+    def definir_senha(self, payload):
+        """Troca obrigatória de senha: só o próprio usuário da sessão, e só quando marcado
+        para troca (must_change). Impede uso fora do fluxo de 1º login pós-redefinição."""
+        sess = self._sessao()
+        if payload.get("id") != sess["id"]:
+            raise ValueError("Operação não permitida.")
+        atual = repo.usuarios.by_login(self.con, sess["login"])
+        if not atual or not atual["must_change"]:
+            raise ValueError("Troca de senha não solicitada.")
+        return repo.usuarios.definir_senha(self.con, sess["id"], payload.get("nova_senha") or "")
+
+    @_api
+    def pick_image(self):
+        """Diálogo nativo para escolher uma imagem; devolve base64 + data URI (não grava nada)."""
+        import base64
+        res = self._win().create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=False,
+            file_types=("Imagens (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)", "Todos os arquivos (*.*)"))
+        if not res:
+            return {"cancelado": True}
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        raw = Path(path).read_bytes()
+        return {"b64": base64.b64encode(raw).decode("ascii"), "uri": services.image_data_uri(raw)}
 
     # ----------------------------------------------------------------- backup / restore
     @_api

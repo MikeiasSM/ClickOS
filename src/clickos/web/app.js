@@ -41,6 +41,8 @@ const ICONS = {
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  key: '<path d="M21 2l-2 2"/><path d="M14.5 6.5 18 10"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m11.5 11.5 8-8 2 2"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 function ic(name, size) {
   const s = size || 18;
@@ -124,10 +126,25 @@ function viewToggle(screen, current, options, onChange) {
   return t;
 }
 
-/* posiciona o popover para cima quando há pouco espaço abaixo (evita corte em modais) */
+/* Posiciona o popover do combobox. Dentro de um modal (que tem overflow), usa position:fixed
+   ancorado na viewport para ESCAPAR do recorte do modal; fora de modal mantém o absolute. */
 function placePop(input, pop) {
   const r = input.getBoundingClientRect();
-  pop.classList.toggle("up", (window.innerHeight - r.bottom) < 260 && r.top > 280);
+  const sc = input.closest(".modal");
+  if (sc) {
+    pop.classList.add("fixed");
+    const ph = pop.offsetHeight || 260;
+    const abaixo = window.innerHeight - r.bottom;
+    const up = abaixo < Math.min(ph + 8, 268) && r.top > abaixo;
+    pop.classList.toggle("up", up);
+    pop.style.left = r.left + "px";
+    pop.style.width = r.width + "px";
+    pop.style.top = up ? Math.max(8, r.top - ph - 4) + "px" : (r.bottom + 4) + "px";
+  } else {
+    pop.classList.remove("fixed");
+    pop.style.left = pop.style.top = pop.style.width = "";
+    pop.classList.toggle("up", (window.innerHeight - r.bottom) < 260 && r.top > 280);
+  }
 }
 /* navegação por teclado (setas/enter/esc) compartilhada pelos comboboxes */
 function keyHandler(input, pop, open, close, getAi, setAi) {
@@ -230,8 +247,8 @@ function cadastrarCidade(nome, onDone) {
 }
 
 /* ----------------------------------------------------------------- router */
-function setActive(view) { document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("active", a.dataset.view === view)); }
-const VIEWS = { dashboard: viewDashboard, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos, empresa: viewEmpresa, usuarios: viewUsuarios };
+function setActive(view) { document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("active", a.dataset.view === view)); const cb = document.getElementById("btn-config"); if (cb) cb.classList.toggle("active", view === "config"); }
+const VIEWS = { dashboard: viewDashboard, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos };
 async function setView(view) { setActive(view); try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
 
 /* ----------------------------------------------------------------- dashboard */
@@ -297,13 +314,13 @@ async function viewDashboard() {
   render(`
     <div class="between dash-head">
       <div><h1 class="page-title">${saudacao()}${primeiroNome ? ", " + esc(primeiroNome) : ""}! 👋</h1><p class="page-sub">${hojeExtenso()}</p></div>
-      <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Novo Cliente</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Novo Documento</span></button></div>
+      <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Nova Pessoa</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Novo Documento</span></button></div>
     </div>
     <div class="cards kpis">
       ${kpi("Faturamento do mês", money(d.faturamento_mes), "dollar", "#16a34a", "#dcfce7", "Total em OS: " + money(d.faturamento_total))}
       ${kpi("OS em aberto", d.abertas, "trending", "#d97706", "#fef9c3", d.os_count + " OS no total")}
       ${kpi("Orçamentos abertos", d.orcamentos_abertos, "file", "#2563eb", "#dbeafe", d.orcamentos + " orçamentos")}
-      ${kpi("Clientes", d.clientes, "users", "#7c3aed", "#f3e8ff", d.veiculos + " veículos")}
+      ${kpi("Pessoas", d.clientes, "users", "#7c3aed", "#f3e8ff", d.veiculos + " veículos")}
     </div>
     <div class="dash-grid mt">
       <div class="card"><div class="between"><h3 style="margin:0">Faturamento (últimos 6 meses)</h3><span class="muted small">Ticket médio: ${money(d.ticket_medio)}</span></div><div id="chart" style="margin-top:12px"></div></div>
@@ -329,7 +346,7 @@ async function viewDocumentos() {
   const mode = vmode("docs", "kanban");
   render(`<div class="between"><div><h1 class="page-title">Ordens de Serviço</h1><p class="page-sub">Quadro de acompanhamento</p></div>
     <div class="row"><span id="vt"></span><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Documento</span></button></div></div>
-    <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, cliente ou placa..."></div></div>
+    <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, pessoa ou placa..."></div></div>
     <div id="board" class="mt"></div>`);
   main().querySelector("#vt").appendChild(viewToggle("docs", mode,
     [{ v: "kanban", icon: "columns", title: "Quadro" }, { v: "list", icon: "list", title: "Lista" }], () => viewDocumentos()));
@@ -443,7 +460,7 @@ async function openDocForm(id) {
       </div>
       <div class="grid3">
         <div class="field"><label>Data de Abertura</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
-        <div class="field"><label>Cliente</label><div id="c_cli"></div></div>
+        <div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div>
       </div>
       <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
@@ -521,7 +538,7 @@ async function openDocForm(id) {
     if (cur && cid && !lista.some(v => String(v.id) === String(cur))) veiCombo._setValue(null);
   };
   cliCombo = comboSelect(clientes, doc.cliente_id || null, {
-    placeholder: "Buscar/selecionar cliente...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || c.telefone || "",
+    placeholder: "Buscar/selecionar pessoa...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || c.telefone || "",
     onSelect: cid => filtraVeiculos(cid),
     onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); cliCombo._setItems(clientes); cliCombo._setValue(c.id); filtraVeiculos(c.id); } }),
   });
@@ -624,18 +641,18 @@ async function printPreview(id) {
   m.querySelector("#imp").onclick = () => { const fr = m.querySelector("iframe"); fr.contentWindow.focus(); fr.contentWindow.print(); };
 }
 
-/* ----------------------------------------------------------------- clientes */
+/* ----------------------------------------------------------------- pessoas (clientes) */
 async function viewClientes() {
   const mode = vmode("clientes", "cards");
-  render(`<div class="between"><div><h1 class="page-title">Clientes</h1><p class="page-sub">Gerencie o cadastro de clientes</p></div>
-      <div class="row"><span id="vt"></span><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Cliente</span></button></div></div>
+  render(`<div class="between"><div><h1 class="page-title">Pessoas</h1><p class="page-sub">Gerencie o cadastro de pessoas</p></div>
+      <div class="row"><span id="vt"></span><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Nova Pessoa</span></button></div></div>
     <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por nome, CPF/CNPJ ou telefone..."></div></div>
     <div id="lista" class="mt"></div>`);
   main().querySelector("#vt").appendChild(viewToggle("clientes", mode, [{ v: "cards", icon: "grid", title: "Blocos" }, { v: "list", icon: "list", title: "Lista" }], () => viewClientes()));
   async function reload() {
     const cs = await api("list_clientes", val("#q"));
     const lst = main().querySelector("#lista"); lst.innerHTML = "";
-    if (!cs.length) { lst.appendChild(emptyState("users", "Nenhum cliente cadastrado", "Cadastre clientes para vinculá-los às ordens e orçamentos.", "Novo Cliente", () => formCliente(null))); return; }
+    if (!cs.length) { lst.appendChild(emptyState("users", "Nenhuma pessoa cadastrada", "Cadastre pessoas para vinculá-las às ordens e orçamentos.", "Nova Pessoa", () => formCliente(null))); return; }
     if (mode === "list") {
       const list = h(`<div class="list-rows"></div>`);
       cs.forEach(c => {
@@ -671,10 +688,10 @@ async function viewClientes() {
   main().querySelector("#q").addEventListener("input", reload);
   reload(); window.__reloadClientes = reload;
 }
-async function delCliente(c) { if (await confirma("Excluir este cliente?", { danger: true, ok: "Excluir" })) { await api("delete_cliente", c.id); toast("Excluído", "ok"); viewClientes(); } }
+async function delCliente(c) { if (await confirma("Excluir esta pessoa?", { danger: true, ok: "Excluir" })) { await api("delete_cliente", c.id); toast("Excluída", "ok"); viewClientes(); } }
 function formCliente(c, opts) {
   c = Object.assign({}, c || {}, (opts && opts.prefill) || {});
-  const m = h(`<div class="modal"><button class="close">×</button><h3>${c.id ? "Editar" : "Novo"} Cliente</h3>
+  const m = h(`<div class="modal"><button class="close">×</button><h3>${c.id ? "Editar Pessoa" : "Nova Pessoa"}</h3>
     <div class="grid2"><div class="field"><label>Nome *</label><input id="nome" value="${esc(c.nome || "")}"></div>
       <div class="field"><label>CPF/CNPJ</label><input id="cpf" value="${esc(c.cpf_cnpj || "")}"></div></div>
     <div class="grid2"><div class="field"><label>Apelido/Nome Fantasia</label><input id="apelido" value="${esc(c.apelido || "")}"></div>
@@ -688,6 +705,10 @@ function formCliente(c, opts) {
       <div class="field"><label>Bairro</label><input id="bairro" value="${esc(c.bairro || "")}"></div></div>
     <div class="grid2"><div class="field"><label>Cidade</label><div id="c_cidade"></div></div>
       <div class="field"><label>UF</label><input id="uf" value="${esc(c.uf || "")}" readonly placeholder="(definida pela cidade)"></div></div>
+    <hr class="sep">
+    <div class="between" style="align-items:center"><h3 class="sec-title" style="margin:0">${ic("car", 16)} Veículos</h3>
+      <button class="btn btn-sm" id="addv">${ic("plus", 15)}<span>Adicionar veículo</span></button></div>
+    <div id="veic-list" class="mt"></div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m);
   bindMask(m.querySelector("#cpf"), mDoc); bindMask(m.querySelector("#tel"), mFone); bindMask(m.querySelector("#wpp"), mFone);
@@ -701,15 +722,47 @@ function formCliente(c, opts) {
   m.querySelector("#c_cidade").appendChild(cidadeCombo);
   const cep = m.querySelector("#cep"); bindMask(cep, mCEP);
   cep.addEventListener("change", () => cepLookup(cep.value, { endereco: m.querySelector("#end"), bairro: m.querySelector("#bairro"), cidade: cidadeCombo._input, uf: ufField }));
-  m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
-  m.querySelector("#sv").onclick = async () => {
+
+  // ----- seção de Veículos (agrupa todos os veículos desta pessoa) -----
+  const veicBox = m.querySelector("#veic-list");
+  async function reloadVeics() {
+    veicBox.innerHTML = "";
+    if (!c.id) { veicBox.appendChild(h(`<div class="muted small">Salve a pessoa para cadastrar e agrupar os veículos dela aqui.</div>`)); return; }
+    const vs = await api("veiculos_cliente", c.id);
+    if (!vs.length) { veicBox.appendChild(h(`<div class="muted small">Nenhum veículo cadastrado para esta pessoa.</div>`)); return; }
+    const list = h(`<div class="list-rows"></div>`);
+    vs.forEach(v => {
+      const r = h(`<div class="list-row"><div class="avatar purple">${ic("car", 18)}</div><div class="grow">
+        <div style="font-weight:700">${esc(v.placa)} <span class="muted small">${esc(v.marca || "")} ${esc(v.modelo || "")}</span></div>
+        <div class="small muted">Cor: ${esc(v.cor || "-")} · Ano: ${esc(v.ano_fab || "-")}</div></div><div class="acts"></div></div>`);
+      r.querySelector(".acts").appendChild(btn("", "edit", () => formVeiculo(v, null, { lockOwner: true, ownerName: val("#nome", m) || c.nome, prefill: { cliente_id: c.id }, onSaved: () => reloadVeics() })));
+      r.querySelector(".acts").appendChild(btn("", "trash", () => delVeicInline(v), "btn-danger"));
+      list.appendChild(r);
+    });
+    veicBox.appendChild(list); injectIcons(veicBox);
+  }
+  async function delVeicInline(v) { if (await confirma(`Excluir o veículo ${esc(v.placa)}?`, { danger: true, ok: "Excluir" })) { await api("delete_veiculo", v.id); toast("Veículo excluído", "ok"); reloadVeics(); } }
+  async function salvar() {
     const payload = { id: c.id, nome: val("#nome", m), cpf_cnpj: val("#cpf", m), apelido: val("#apelido", m), rg_ie: val("#rgie", m),
       telefone: val("#tel", m), whatsapp: val("#wpp", m), email: val("#email", m), endereco: val("#end", m),
       numero: val("#numero", m), bairro: val("#bairro", m), cidade: cidadeCombo._value(), uf: ufField.value.trim(), cep: val("#cep", m) };
-    if (!payload.nome || !payload.telefone) { toast("Nome e Telefone são obrigatórios", "err"); return; }
-    const saved = await api("save_cliente", payload); await refreshSug(); toast("Cliente salvo", "ok"); bg.remove();
+    if (!payload.nome || !payload.telefone) { toast("Nome e Telefone são obrigatórios", "err"); return null; }
+    const saved = await api("save_cliente", payload); await refreshSug();
+    c.id = saved.id; Object.assign(c, saved);
+    return saved;
+  }
+  m.querySelector("#addv").onclick = async () => {
+    if (!c.id) { const s = await salvar(); if (!s) return; toast("Pessoa salva — adicione os veículos", "ok"); await reloadVeics(); }
+    formVeiculo(null, null, { lockOwner: true, ownerName: val("#nome", m) || c.nome, prefill: { cliente_id: c.id }, onSaved: () => reloadVeics() });
+  };
+  m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
+  m.querySelector("#sv").onclick = async () => {
+    const saved = await salvar();
+    if (!saved) return;
+    toast("Pessoa salva", "ok"); bg.remove();
     if (opts && opts.onSaved) opts.onSaved(saved); else if (window.__reloadClientes) window.__reloadClientes();
   };
+  reloadVeics();
 }
 function dl(id, values) { return `<datalist id="${id}">${(values || []).map(v => `<option value="${esc(v)}"></option>`).join("")}</datalist>`; }
 
@@ -763,7 +816,12 @@ async function viewVeiculos() {
 }
 async function delVeiculo(v) { if (await confirma("Excluir este veículo?", { danger: true, ok: "Excluir" })) { await api("delete_veiculo", v.id); toast("Excluído", "ok"); viewVeiculos(); } }
 function formVeiculo(v, clientes, opts) {
-  v = Object.assign({}, v || {}, (opts && opts.prefill) || {});
+  opts = opts || {};
+  v = Object.assign({}, v || {}, opts.prefill || {});
+  const lockOwner = !!opts.lockOwner;  // dono fixo (cadastro a partir do form da Pessoa)
+  const propHtml = lockOwner
+    ? `<input value="${esc(opts.ownerName || "")}" readonly>`
+    : `<div id="c_prop"></div>`;
   const m = h(`<div class="modal"><button class="close">×</button><h3>${v.id ? "Editar" : "Novo"} Veículo</h3>
     <div class="grid2"><div class="field"><label>Placa *</label><input id="placa" value="${esc(v.placa || "")}" placeholder="ABC1D23"></div>
       <div class="field"><label>Ano (Fab.)</label><input id="ano" value="${esc(v.ano_fab || "")}"></div></div>
@@ -775,7 +833,7 @@ function formVeiculo(v, clientes, opts) {
       <div class="field"><label>Renavam</label><input id="renavam" value="${esc(v.renavam || "")}"></div></div>
     <div class="grid2"><div class="field"><label>Combustível</label><div id="c_comb"></div></div>
       <div class="field"><label>KM Atual</label><input id="km" value="${esc(v.km_atual || "")}"></div></div>
-    <div class="field"><label>Proprietário *</label><div id="c_prop"></div></div>
+    <div class="field"><label>Proprietário *</label>${propHtml}</div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m);
   bindUpper(m.querySelector("#placa")); bindInt(m.querySelector("#ano")); bindInt(m.querySelector("#renavam")); bindInt(m.querySelector("#km"));
@@ -783,17 +841,21 @@ function formVeiculo(v, clientes, opts) {
   const marcaC = comboText(SUG.marcas, v.marca || "", { placeholder: "Marca", getLabel: x => x }); m.querySelector("#c_marca").appendChild(marcaC);
   const corC = comboText(SUG.cores, v.cor || "", { placeholder: "Cor", getLabel: x => x }); m.querySelector("#c_cor").appendChild(corC);
   const combC = comboText(SUG.combustiveis, v.combustivel || "", { placeholder: "Combustível", getLabel: x => x }); m.querySelector("#c_comb").appendChild(combC);
-  const propC = comboSelect(clientes, v.cliente_id || null, { placeholder: "Buscar/selecionar cliente...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || "",
-    onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); propC._setItems(clientes); propC._setValue(c.id); } }) });
-  m.querySelector("#c_prop").appendChild(propC);
+  let propC = null;
+  if (!lockOwner) {
+    propC = comboSelect(clientes, v.cliente_id || null, { placeholder: "Buscar/selecionar pessoa...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || "",
+      onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); propC._setItems(clientes); propC._setValue(c.id); } }) });
+    m.querySelector("#c_prop").appendChild(propC);
+  }
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
   m.querySelector("#sv").onclick = async () => {
+    const owner = lockOwner ? (opts.prefill && opts.prefill.cliente_id) || v.cliente_id || null : (propC._value() || null);
     const payload = { id: v.id, placa: val("#placa", m), ano_fab: val("#ano", m), marca: marcaC._value(), modelo: val("#modelo", m),
       versao: val("#versao", m), cor: corC._value(), chassi: val("#chassi", m), renavam: val("#renavam", m),
-      combustivel: combC._value(), km_atual: val("#km", m), cliente_id: propC._value() || null };
+      combustivel: combC._value(), km_atual: val("#km", m), cliente_id: owner };
     if (!payload.placa || !payload.marca || !payload.modelo) { toast("Placa, Marca e Modelo são obrigatórios", "err"); return; }
     const saved = await api("save_veiculo", payload); await refreshSug(); toast("Veículo salvo", "ok"); bg.remove();
-    if (opts && opts.onSaved) opts.onSaved(saved); else if (window.__reloadVeiculos) window.__reloadVeiculos();
+    if (opts.onSaved) opts.onSaved(saved); else if (window.__reloadVeiculos) window.__reloadVeiculos();
   };
 }
 
@@ -865,12 +927,12 @@ function formItem(i) {
   };
 }
 
-/* ----------------------------------------------------------------- empresa */
-async function viewEmpresa() {
+/* ----------------------------------------------------------------- empresa (aba de Configurações) */
+async function renderEmpresa(container) {
   const e = await api("get_empresa");
   const logo = await api("get_logo_uri");
-  render(`<h1 class="page-title">Dados da Empresa</h1><p class="page-sub">Informações que aparecem nos documentos</p>
-    <div class="card mt"><div class="logo-box">
+  container.innerHTML = `
+    <div class="card"><div class="logo-box">
       <div class="logo-prev ${logo.uri ? "" : "empty"}" id="logo-prev">${logo.uri ? `<img src="${logo.uri}">` : "Sem logo"}</div>
       <div><div style="font-weight:700;margin-bottom:2px">Logotipo</div><div class="muted small" style="margin-bottom:8px">Aparece no topo dos documentos impressos.</div>
         <button class="btn btn-sm" id="logo">${ic("image", 15)}<span>Escolher arquivo…</span></button></div></div></div>
@@ -893,70 +955,182 @@ async function viewEmpresa() {
         <div class="field"><label>CEP</label><input id="cep" value="${esc(e.cep || "")}"></div></div></div>
     <div class="card mt"><h3 class="sec-title">Texto Padrão nas OS</h3>
       <div class="field"><label>Observações / Termos padrão</label><textarea id="termos">${esc(e.termos_padrao || "")}</textarea></div></div>
-    <div class="between mt" style="margin-bottom:30px"><span></span><button class="btn btn-primary" id="sv">${ic("save", 16)}<span>Salvar Dados</span></button></div>`);
-  main().querySelector("#sv").onclick = async () => {
+    <div class="between mt"><span></span><button class="btn btn-primary" id="sv">${ic("save", 16)}<span>Salvar Dados</span></button></div>`;
+  injectIcons(container);
+  container.querySelector("#sv").onclick = async () => {
     const payload = { razao_social: val("#razao"), nome_fantasia: val("#fant"), cnpj: val("#cnpj"), ie: val("#ie"), slogan: val("#slogan"),
       telefone: val("#tel"), whatsapp: val("#wpp"), email: val("#email"), site: val("#site"),
       endereco: val("#end"), bairro: val("#bairro"), cidade: val("#cid"), uf: val("#uf"), cep: val("#cep"), termos_padrao: val("#termos") };
     await api("save_empresa", payload); B.empresa = payload; toast("Dados salvos", "ok");
   };
-  main().querySelector("#logo").onclick = async () => {
+  container.querySelector("#logo").onclick = async () => {
     const r = await api("escolher_logo");
-    if (r && r.has_logo) { const l = await api("get_logo_uri"); const p = main().querySelector("#logo-prev"); p.classList.remove("empty"); p.innerHTML = `<img src="${l.uri}">`; toast("Logo atualizado", "ok"); }
+    if (r && r.has_logo) { const l = await api("get_logo_uri"); const p = container.querySelector("#logo-prev"); p.classList.remove("empty"); p.innerHTML = `<img src="${l.uri}">`; toast("Logo atualizado", "ok"); }
   };
 }
 
-/* ----------------------------------------------------------------- usuários */
-async function viewUsuarios() {
-  setActive("usuarios");
+/* ----------------------------------------------------------------- configurações (abas) */
+async function viewConfiguracoes(tab) {
+  tab = tab || "empresa";
+  setActive("config");
+  render(`<h1 class="page-title">Configurações</h1><p class="page-sub">Empresa, usuários e backup do sistema</p>
+    <div class="tabs" id="cfgtabs">
+      <button data-tab="empresa">${ic("building", 16)}<span>Empresa</span></button>
+      <button data-tab="usuarios">${ic("shield", 16)}<span>Usuários</span></button>
+      <button data-tab="backup">${ic("save", 16)}<span>Backup e Restauração</span></button>
+    </div>
+    <div id="cfgbody" class="mt"></div>`);
+  const tabs = main().querySelector("#cfgtabs");
+  tabs.querySelectorAll("button").forEach(b => { b.classList.toggle("on", b.dataset.tab === tab); b.onclick = () => viewConfiguracoes(b.dataset.tab); });
+  const body = main().querySelector("#cfgbody");
+  body.innerHTML = '<div class="empty">Carregando…</div>';
+  if (tab === "empresa") await renderEmpresa(body);
+  else if (tab === "usuarios") await renderUsuarios(body);
+  else renderBackup(body);
+}
+function renderBackup(container) {
+  container.innerHTML = `
+    <div class="card"><h3 class="sec-title">Backup dos dados</h3>
+      <p class="muted" style="margin:0 0 14px">Gera uma cópia de segurança de todo o banco (pessoas, veículos, documentos, usuários e configurações) em um arquivo <b>.db</b> que você escolhe onde salvar.</p>
+      <button class="btn btn-primary" id="bk">${ic("save", 16)}<span>Fazer backup agora</span></button></div>
+    <div class="card mt"><h3 class="sec-title">Restaurar backup</h3>
+      <p class="muted" style="margin:0 0 14px">Substitui <b>todos</b> os dados atuais pelos de um arquivo de backup. Esta ação não pode ser desfeita — faça um backup antes, se necessário.</p>
+      <button class="btn btn-danger" id="rs">${ic("upload", 16)}<span>Restaurar de um arquivo…</span></button></div>`;
+  injectIcons(container);
+  container.querySelector("#bk").onclick = doBackup;
+  container.querySelector("#rs").onclick = doRestore;
+}
+
+/* ----------------------------------------------------------------- usuários (aba de Configurações) */
+async function renderUsuarios(container) {
   const us = await api("list_usuarios");
-  render(`<div class="between"><div><h1 class="page-title">Usuários</h1><p class="page-sub">Controle de acesso ao sistema</p></div>
+  container.innerHTML = `<div class="between" style="margin-bottom:14px"><div class="muted small">${us.length} usuário(s) · login sempre em MAIÚSCULAS</div>
       <button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Usuário</span></button></div>
-    <div id="lista" class="mt"></div>`);
-  const lst = main().querySelector("#lista");
+    <div id="ulista"></div>`;
+  injectIcons(container);
+  const lst = container.querySelector("#ulista");
   if (!us.length) { lst.appendChild(emptyState("shield", "Nenhum usuário", "Cadastre usuários para controlar o acesso.", "Novo Usuário", () => formUsuario(null))); }
   else {
     const list = h(`<div class="list-rows"></div>`);
     us.forEach(u => {
       const eu = CURRENT_USER && u.id === CURRENT_USER.id;
-      const r = h(`<div class="list-row"><div class="avatar blue">${ic("user", 22)}</div><div class="grow">
-        <div style="font-weight:700">${esc(u.nome || u.login)} ${eu ? '<span class="badge b-os">você</span>' : ""} ${u.ativo ? "" : '<span class="badge b-gray">Inativo</span>'}</div>
+      const ava = u.avatar_uri ? `<div class="avatar blue" style="overflow:hidden"><img src="${u.avatar_uri}" style="width:100%;height:100%;object-fit:cover"></div>` : `<div class="avatar blue">${ic("user", 22)}</div>`;
+      const r = h(`<div class="list-row">${ava}<div class="grow">
+        <div style="font-weight:700">${esc(u.nome || u.login)} ${eu ? '<span class="badge b-os">você</span>' : ""} ${u.is_suporte ? '<span class="badge b-orc">mestre</span>' : ""} ${u.ativo ? "" : '<span class="badge b-gray">Inativo</span>'} ${u.must_change ? '<span class="badge b-aberta">senha provisória</span>' : ""}</div>
         <div class="small muted">Login: ${esc(u.login)}</div></div><div class="acts"></div></div>`);
-      r.querySelector(".acts").appendChild(btn("", "edit", () => formUsuario(u)));
-      r.querySelector(".acts").appendChild(btn("", "trash", () => delUsuario(u), "btn-danger"));
+      const a = r.querySelector(".acts");
+      const souSuporte = CURRENT_USER && CURRENT_USER.is_suporte;
+      const podeEditar = !u.is_suporte || souSuporte;   // só o SUPORTE edita/redefine o SUPORTE
+      if (!eu && podeEditar) a.appendChild(btn("", "lock", () => redefinirSenha(u), ""));  // redefinir senha de outro
+      if (podeEditar) a.appendChild(btn("", "edit", () => formUsuario(u)));
+      if (!u.is_suporte) a.appendChild(btn("", "trash", () => delUsuario(u), "btn-danger"));
       list.appendChild(r);
     });
     lst.appendChild(list); injectIcons(lst);
   }
-  main().querySelector("#novo").onclick = () => formUsuario(null);
+  const nv = container.querySelector("#novo"); if (nv) nv.onclick = () => formUsuario(null);
 }
 async function delUsuario(u) {
+  if (u.is_suporte) { toast("O usuário SUPORTE não pode ser excluído.", "err"); return; }
   if (CURRENT_USER && u.id === CURRENT_USER.id) { toast("Você não pode excluir o usuário conectado.", "err"); return; }
   if (await confirma(`Excluir o usuário "${esc(u.login)}"?`, { danger: true, ok: "Excluir" })) {
-    await api("delete_usuario", u.id); toast("Usuário excluído", "ok"); viewUsuarios();
+    await api("delete_usuario", u.id); toast("Usuário excluído", "ok"); viewConfiguracoes("usuarios");
   }
 }
 function formUsuario(u) {
   u = u || { ativo: 1 };
+  let avatarB64 = null, avatarRemover = false;  // estado do avatar escolhido nesta edição
   const m = h(`<div class="modal" style="width:480px"><button class="close">×</button><h3>${u.id ? "Editar" : "Novo"} Usuário</h3>
+    <div class="ava-box">
+      <div class="ava-prev" id="ava">${u.avatar_uri ? `<img src="${u.avatar_uri}">` : ic("user", 30)}</div>
+      <div><div style="font-weight:700;margin-bottom:2px">Avatar</div><div class="muted small" style="margin-bottom:8px">Foto do usuário (opcional).</div>
+        <button class="btn btn-sm" id="avpick">${ic("image", 15)}<span>Escolher…</span></button>
+        <button class="btn btn-sm btn-danger" id="avdel" style="${u.avatar_uri ? "" : "display:none"}">${ic("trash", 15)}</button></div>
+    </div>
     <div class="field"><label>Nome</label><input id="nome" value="${esc(u.nome || "")}"></div>
-    <div class="field"><label>Login *</label><input id="login" value="${esc(u.login || "")}" autocomplete="off"></div>
+    <div class="field"><label>Login * (MAIÚSCULAS)</label><input id="login" value="${esc(u.login || "")}" autocomplete="off" ${u.is_suporte ? "readonly" : ""}></div>
     <div class="field"><label>Senha ${u.id ? "(em branco mantém a atual)" : "*"}</label><input id="senha" type="password" autocomplete="new-password" placeholder="${u.id ? "••••••••" : "Mínimo 4 caracteres"}"></div>
     <div class="field"><label>Situação</label><div id="c_ativo"></div></div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m);
+  const loginInput = m.querySelector("#login");
+  if (!u.is_suporte) loginInput.addEventListener("input", () => { const p = loginInput.selectionStart; loginInput.value = loginInput.value.toUpperCase(); loginInput.setSelectionRange(p, p); });
   const ativoCombo = selectCombo([{ value: "1", label: "Ativo" }, { value: "0", label: "Inativo" }], u.ativo ? "1" : "0", null);
   m.querySelector("#c_ativo").appendChild(ativoCombo);
+  const ava = m.querySelector("#ava"), avdel = m.querySelector("#avdel");
+  m.querySelector("#avpick").onclick = async () => {
+    const r = await api("pick_image");
+    if (r && r.uri) { avatarB64 = r.b64; avatarRemover = false; ava.innerHTML = `<img src="${r.uri}">`; avdel.style.display = ""; }
+  };
+  avdel.onclick = () => { avatarB64 = null; avatarRemover = true; ava.innerHTML = ic("user", 30); avdel.style.display = "none"; };
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
   m.querySelector("#sv").onclick = async () => {
     const senha = m.querySelector("#senha").value;
     const payload = { id: u.id, nome: val("#nome", m), login: val("#login", m), senha, ativo: parseInt(ativoCombo._value()) };
+    if (avatarB64) payload.avatar_b64 = avatarB64; else if (avatarRemover) payload.avatar_remove = true;
     if (!payload.login) { toast("Login é obrigatório", "err"); return; }
     if (!u.id && senha.length < 4) { toast("A senha deve ter ao menos 4 caracteres", "err"); return; }
     const saved = await api("save_usuario", payload);
-    if (CURRENT_USER && saved && saved.id === CURRENT_USER.id) { CURRENT_USER.nome = saved.nome; CURRENT_USER.login = saved.login; mountUserChip(); }
-    toast("Usuário salvo", "ok"); bg.remove(); viewUsuarios();
+    if (CURRENT_USER && saved && saved.id === CURRENT_USER.id) { CURRENT_USER.nome = saved.nome; CURRENT_USER.login = saved.login; CURRENT_USER.avatar_uri = saved.avatar_uri; mountUserChip(); }
+    toast("Usuário salvo", "ok"); bg.remove(); viewConfiguracoes("usuarios");
   };
+}
+/* redefinir senha de outro usuário (valida com a senha do solicitante; alvo troca no 1º login) */
+function redefinirSenha(alvo) {
+  const m = h(`<div class="modal" style="width:440px"><button class="close">×</button><h3>Redefinir senha</h3>
+    <p class="muted" style="margin:0 0 14px">Você vai redefinir a senha de <b>${esc(alvo.nome || alvo.login)}</b> para a senha padrão. Confirme com a <b>sua</b> senha para autorizar.</p>
+    <div class="field"><label>Sua senha *</label><input id="sp" type="password" autocomplete="off"></div>
+    <div class="login-err" id="er"></div>
+    <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="ok">Redefinir senha</button></div></div>`);
+  const bg = openModal(m);
+  const sp = m.querySelector("#sp"), er = m.querySelector("#er");
+  setTimeout(() => sp.focus(), 30);
+  const go = async () => {
+    er.textContent = "";
+    try {
+      const r = await window.pywebview.api.reset_senha({ alvo_id: alvo.id, solicitante_id: CURRENT_USER && CURRENT_USER.id, senha: sp.value });
+      if (r && r.ok === false) { er.textContent = r.erro || "Não foi possível redefinir."; return; }
+      bg.remove();
+      const info = h(`<div class="modal" style="width:460px"><h3>Senha redefinida</h3>
+        <p class="muted" style="margin:0">A senha de <b>${esc(r.data.login)}</b> foi redefinida para a senha padrão:</p>
+        <div class="pass-box">${esc(r.data.senha_padrao)}</div>
+        <p class="muted" style="margin:0 0 4px">Este usuário deverá <b>obrigatoriamente</b> alterá-la ao fazer o próximo login.</p>
+        <p class="muted small" style="margin:0">Lembrete: o acesso <b>SUPORTE</b> permanece como administrador mestre do sistema.</p>
+        <div class="between mt"><span></span><button class="btn btn-primary" id="ok2">Entendi</button></div></div>`);
+      const bg2 = openModal(info);
+      info.querySelector("#ok2").onclick = () => { bg2.remove(); viewConfiguracoes("usuarios"); };
+    } catch (e) { er.textContent = "Erro ao redefinir a senha."; }
+  };
+  m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
+  m.querySelector("#ok").onclick = go;
+  sp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+}
+/* troca obrigatória no primeiro login após uma redefinição (modal não dispensável) */
+function trocaSenhaObrigatoria(user) {
+  return new Promise(resolve => {
+    const m = h(`<div class="modal" style="width:440px"><h3>Defina uma nova senha</h3>
+      <p class="muted" style="margin:0 0 16px">Sua senha foi redefinida para a senha padrão. Por segurança, crie uma nova senha para continuar — ela não pode ser igual à atual.</p>
+      <div class="field"><label>Nova senha *</label><input id="s1" type="password" placeholder="Mínimo 4 caracteres"></div>
+      <div class="field"><label>Confirmar nova senha *</label><input id="s2" type="password"></div>
+      <div class="login-err" id="er"></div>
+      <div class="between mt"><span></span><button class="btn btn-primary" id="ok">Salvar nova senha</button></div></div>`);
+    const bg = h(`<div class="modal-bg"></div>`); bg.appendChild(m);
+    document.getElementById("modal-root").appendChild(bg); injectIcons(m);
+    const s1 = m.querySelector("#s1"), s2 = m.querySelector("#s2"), er = m.querySelector("#er");
+    setTimeout(() => s1.focus(), 30);
+    const go = async () => {
+      er.textContent = "";
+      if (s1.value.length < 4) { er.textContent = "A senha deve ter ao menos 4 caracteres."; return; }
+      if (s1.value !== s2.value) { er.textContent = "As senhas não conferem."; return; }
+      try {
+        const r = await window.pywebview.api.definir_senha({ id: user.id, nova_senha: s1.value });
+        if (r && r.ok === false) { er.textContent = r.erro || "Não foi possível salvar."; return; }
+        bg.remove(); resolve(r.data);
+      } catch (e) { er.textContent = "Erro ao salvar a senha."; }
+    };
+    m.querySelector("#ok").onclick = go;
+    s2.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  });
 }
 
 /* ----------------------------------------------------------------- login / sessão */
@@ -971,13 +1145,17 @@ function showLogin() {
       <div class="login-err" id="lg_err"></div></div></div>`);
     document.body.appendChild(ov); injectIcons(ov);
     const user = ov.querySelector("#lg_user"), pass = ov.querySelector("#lg_pass"), err = ov.querySelector("#lg_err"), bt = ov.querySelector("#lg_btn");
+    user.addEventListener("input", () => { const p = user.selectionStart; user.value = user.value.toUpperCase(); user.setSelectionRange(p, p); });
     setTimeout(() => user.focus(), 30);
     const doLogin = async () => {
       err.textContent = ""; bt.disabled = true;
       try {
-        const r = await window.pywebview.api.login({ login: user.value.trim(), senha: pass.value });
+        const r = await window.pywebview.api.login({ login: user.value.trim().toUpperCase(), senha: pass.value });
         if (r && r.ok === false) { err.textContent = r.erro || "Login ou senha inválidos."; pass.value = ""; pass.focus(); bt.disabled = false; return; }
-        ov.remove(); resolve(r.data);
+        ov.remove();
+        let u = r.data;
+        if (u && u.must_change) u = await trocaSenhaObrigatoria(u);  // 1º login após redefinição
+        resolve(u);
       } catch (e) { err.textContent = "Erro ao entrar. Tente novamente."; bt.disabled = false; }
     };
     bt.onclick = doLogin;
@@ -989,10 +1167,13 @@ function mountUserChip() {
   const box = document.getElementById("user-box"); if (!box) return;
   box.style.display = "flex";
   document.getElementById("user-name").textContent = (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "";
+  const ava = document.getElementById("user-ava");
+  if (ava) { if (CURRENT_USER && CURRENT_USER.avatar_uri) ava.innerHTML = `<img src="${CURRENT_USER.avatar_uri}">`; else { ava.innerHTML = ic("user", 18); } }
   document.getElementById("btn-logout").onclick = logout;
 }
 async function logout() {
   if (!await confirma("Deseja sair da sua conta?", { ok: "Sair" })) return;
+  try { await window.pywebview.api.logout(); } catch (e) {}  // limpa a sessão no servidor
   CURRENT_USER = null;
   document.getElementById("app").style.display = "none";
   document.getElementById("user-box").style.display = "none";
@@ -1012,8 +1193,7 @@ async function doRestore() {
 async function refreshSug() { try { SUG = await api("sugestoes"); } catch (e) {} }
 function bindNav() {
   document.querySelectorAll(".menu a").forEach(a => a.onclick = () => setView(a.dataset.view));
-  document.getElementById("btn-backup").onclick = doBackup;
-  document.getElementById("btn-restore").onclick = doRestore;
+  const cfg = document.getElementById("btn-config"); if (cfg) cfg.onclick = () => viewConfiguracoes();
 }
 async function start() {
   window.__p = "begin";

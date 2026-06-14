@@ -1,13 +1,33 @@
 """Regras de negócio puras: numeração, cálculo de totais e conversão Orçamento->OS."""
+import base64
 import hashlib
 import hmac
 import os
 
 PBKDF2_ITER = 120000
+SENHA_RESET = "1234"  # senha temporária aplicada ao redefinir (usuário troca no 1º login)
 
 
 class EmVinculo(Exception):
     """Levantada ao tentar excluir um registro que possui documentos vinculados."""
+
+
+def image_data_uri(blob) -> str:
+    """Monta um data: URI a partir dos bytes de uma imagem (detecta png/jpeg/gif/webp)."""
+    if not blob:
+        return ""
+    head = bytes(blob[:12])
+    if head[:3] == b"\xff\xd8\xff":
+        mime = "image/jpeg"
+    elif head[:8] == b"\x89PNG\r\n\x1a\n":
+        mime = "image/png"
+    elif head[:6] in (b"GIF87a", b"GIF89a"):
+        mime = "image/gif"
+    elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        mime = "image/png"
+    return "data:%s;base64,%s" % (mime, base64.b64encode(bytes(blob)).decode("ascii"))
 
 
 def hash_senha(senha, salt=None):
@@ -105,6 +125,7 @@ def convert_to_os(con, orcamento_id: int, stamp: str | None = None) -> dict:
         "item_chave_reserva": orc.get("item_chave_reserva", 0),
         "item_documento": orc.get("item_documento", 0),
         "item_manual": orc.get("item_manual", 0),
+        "usuario_id": orc.get("usuario_id"),  # a OS herda o responsável do orçamento
         "origem_orcamento_id": orcamento_id,
         "itens": [
             {k: it.get(k) for k in ("item_catalogo_id", "descricao", "tipo",

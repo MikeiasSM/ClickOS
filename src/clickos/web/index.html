@@ -20,20 +20,17 @@
       <nav class="menu">
         <a data-view="dashboard"><span class="ic" data-icon="grid"></span><span>Dashboard</span></a>
         <a data-view="documentos"><span class="ic" data-icon="file"></span><span>Ordens de Serviço</span></a>
-        <a data-view="clientes"><span class="ic" data-icon="users"></span><span>Clientes</span></a>
+        <a data-view="clientes"><span class="ic" data-icon="users"></span><span>Pessoas</span></a>
         <a data-view="veiculos"><span class="ic" data-icon="car"></span><span>Veículos</span></a>
         <a data-view="produtos"><span class="ic" data-icon="box"></span><span>Produtos e Serviços</span></a>
-        <a data-view="empresa"><span class="ic" data-icon="building"></span><span>Dados da Empresa</span></a>
-        <a data-view="usuarios"><span class="ic" data-icon="shield"></span><span>Usuários</span></a>
       </nav>
-      <div class="user-box" id="user-box" style="display:none">
-        <div class="user-ava"><span class="ic" data-icon="user"></span></div>
-        <div class="user-info"><div class="user-name" id="user-name"></div><div class="user-role">Conectado</div></div>
-        <button class="user-logout" id="btn-logout" title="Sair"><span class="ic" data-icon="logout"></span></button>
-      </div>
-      <div class="sidebar-foot">
-        <button id="btn-backup" class="btn btn-ghost btn-sm"><span class="ic" data-icon="save"></span> Backup</button>
-        <button id="btn-restore" class="btn btn-ghost btn-sm"><span class="ic" data-icon="upload"></span> Restaurar</button>
+      <div class="sidebar-bottom">
+        <button class="cfg-btn" id="btn-config"><span class="ic" data-icon="settings"></span><span>Configurações</span></button>
+        <div class="user-box" id="user-box" style="display:none">
+          <div class="user-ava" id="user-ava"><span class="ic" data-icon="user"></span></div>
+          <div class="user-info"><div class="user-name" id="user-name"></div><div class="user-role">Conectado</div></div>
+          <button class="user-logout" id="btn-logout" title="Sair"><span class="ic" data-icon="logout"></span></button>
+        </div>
       </div>
     </aside>
     <main id="main" class="main"></main>

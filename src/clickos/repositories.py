@@ -62,9 +62,9 @@ class _Clientes:
 
     def delete(self, con, cid):
         if con.execute("SELECT 1 FROM documentos WHERE cliente_id=? LIMIT 1", (cid,)).fetchone():
-            raise services.EmVinculo("Cliente possui documentos vinculados e não pode ser excluído.")
+            raise services.EmVinculo("Pessoa possui documentos vinculados e não pode ser excluída.")
         if con.execute("SELECT 1 FROM veiculos WHERE cliente_id=? LIMIT 1", (cid,)).fetchone():
-            raise services.EmVinculo("Cliente possui veículos vinculados. Exclua-os primeiro.")
+            raise services.EmVinculo("Pessoa possui veículos vinculados. Exclua-os primeiro.")
         con.execute("DELETE FROM clientes WHERE id=?", (cid,))
         con.commit()
 
@@ -257,22 +257,46 @@ class _Documentos:
 
 
 # --------------------------------------------------------------------------- usuarios
+SUPORTE_LOGIN = "SUPORTE"  # conta mestre: nunca pode ser excluída
+
+
+def _norm_login(login) -> str:
+    return (login or "").strip().upper()  # logins são sempre em MAIÚSCULAS
+
+
+def _decode_avatar(b64):
+    if not b64:
+        return None
+    import base64
+    return base64.b64decode(str(b64).split(",", 1)[-1])  # tolera prefixo data:
+
+
 class _Usuarios:
-    PUB = "id, login, nome, ativo, criado_em"  # nunca expõe senha_hash/salt à UI
+    def _public(self, row):
+        """Dict seguro para a UI: nunca inclui senha_hash/salt; embute avatar como data URI."""
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "login": row["login"], "nome": row["nome"],
+            "ativo": row["ativo"], "criado_em": row["criado_em"],
+            "must_change": row["must_change"] if "must_change" in row.keys() else 0,
+            "avatar_uri": services.image_data_uri(row["avatar"] if "avatar" in row.keys() else None),
+            "is_suporte": _norm_login(row["login"]) == SUPORTE_LOGIN,
+        }
 
     def list(self, con):
-        return _rows(con.execute(
-            f"SELECT {self.PUB} FROM usuarios ORDER BY login COLLATE NOCASE").fetchall())
+        rows = con.execute("SELECT * FROM usuarios ORDER BY login COLLATE NOCASE").fetchall()
+        return [self._public(r) for r in rows]
 
     def get(self, con, uid):
-        return _row(con.execute(f"SELECT {self.PUB} FROM usuarios WHERE id=?", (uid,)).fetchone())
+        return self._public(con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone())
 
     def by_login(self, con, login):
         return _row(con.execute(
-            "SELECT * FROM usuarios WHERE login=? COLLATE NOCASE", ((login or "").strip(),)).fetchone())
+            "SELECT * FROM usuarios WHERE login=? COLLATE NOCASE", (_norm_login(login),)).fetchone())
 
     def create(self, con, data, stamp=None):
-        login = (data.get("login") or "").strip()
+        login = _norm_login(data.get("login"))
         senha = data.get("senha") or ""
         if not login:
             raise ValueError("Login é obrigatório.")
@@ -282,9 +306,10 @@ class _Usuarios:
             raise ValueError("Já existe um usuário com esse login.")
         salt, senha_hash = services.hash_senha(senha)
         cur = con.execute(
-            "INSERT INTO usuarios(login, nome, senha_hash, salt, ativo, criado_em) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO usuarios(login, nome, senha_hash, salt, ativo, criado_em, avatar, must_change) "
+            "VALUES (?,?,?,?,?,?,?,0)",
             (login, (data.get("nome") or login).strip(), senha_hash, salt,
-             1 if data.get("ativo", 1) else 0, _now(stamp)))
+             1 if data.get("ativo", 1) else 0, _now(stamp), _decode_avatar(data.get("avatar_b64"))))
         con.commit()
         return self.get(con, cur.lastrowid)
 
@@ -292,26 +317,37 @@ class _Usuarios:
         row = con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone()
         if row is None:
             raise ValueError("Usuário não encontrado.")
-        login = (data.get("login") or row["login"]).strip()
+        e_suporte = _norm_login(row["login"]) == SUPORTE_LOGIN
+        # o login do SUPORTE é fixo (conta mestre); demais podem ser renomeados (sempre MAIÚSCULO)
+        login = row["login"] if e_suporte else (_norm_login(data.get("login")) or row["login"])
         if con.execute("SELECT 1 FROM usuarios WHERE login=? COLLATE NOCASE AND id<>?",
                        (login, uid)).fetchone():
             raise ValueError("Já existe um usuário com esse login.")
         nome = (data.get("nome") or row["nome"] or login).strip()
-        ativo = 1 if data.get("ativo", row["ativo"]) else 0
+        ativo = 1 if (data.get("ativo", row["ativo"]) or e_suporte) else 0  # SUPORTE nunca inativa
+        sets = ["login=?", "nome=?", "ativo=?"]
+        vals = [login, nome, ativo]
         senha = (data.get("senha") or "").strip()
         if senha:
             if len(senha) < 4:
                 raise ValueError("A senha deve ter ao menos 4 caracteres.")
             salt, senha_hash = services.hash_senha(senha)
-            con.execute("UPDATE usuarios SET login=?, nome=?, ativo=?, senha_hash=?, salt=? WHERE id=?",
-                        (login, nome, ativo, senha_hash, salt, uid))
-        else:
-            con.execute("UPDATE usuarios SET login=?, nome=?, ativo=? WHERE id=?",
-                        (login, nome, ativo, uid))
+            sets += ["senha_hash=?", "salt=?", "must_change=0"]
+            vals += [senha_hash, salt]
+        if data.get("avatar_remove"):
+            sets += ["avatar=?"]; vals += [None]
+        elif data.get("avatar_b64"):
+            sets += ["avatar=?"]; vals += [_decode_avatar(data.get("avatar_b64"))]
+        con.execute(f"UPDATE usuarios SET {','.join(sets)} WHERE id=?", vals + [uid])
         con.commit()
         return self.get(con, uid)
 
     def delete(self, con, uid):
+        row = con.execute("SELECT login FROM usuarios WHERE id=?", (uid,)).fetchone()
+        if row is None:
+            return
+        if _norm_login(row["login"]) == SUPORTE_LOGIN:
+            raise services.EmVinculo("O usuário SUPORTE não pode ser excluído.")
         if con.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] <= 1:
             raise services.EmVinculo("Não é possível excluir o único usuário do sistema.")
         con.execute("DELETE FROM usuarios WHERE id=?", (uid,))
@@ -322,8 +358,39 @@ class _Usuarios:
         if row is None or not row["ativo"]:
             return None
         if services.verifica_senha(senha, row["salt"], row["senha_hash"]):
-            return {"id": row["id"], "login": row["login"], "nome": row["nome"]}
+            return self._public(row)
         return None
+
+    def reset_senha(self, con, alvo_id, solicitante_id, senha_solicitante):
+        """Redefine a senha de `alvo_id` para a padrão (1234), exigindo a senha do solicitante.
+        O alvo deverá obrigatoriamente trocar a senha no próximo login (must_change=1)."""
+        solic = con.execute("SELECT * FROM usuarios WHERE id=?", (solicitante_id,)).fetchone()
+        if solic is None or not services.verifica_senha(senha_solicitante, solic["salt"], solic["senha_hash"]):
+            raise ValueError("Sua senha está incorreta. Redefinição cancelada.")
+        alvo = con.execute("SELECT * FROM usuarios WHERE id=?", (alvo_id,)).fetchone()
+        if alvo is None:
+            raise ValueError("Usuário não encontrado.")
+        salt, senha_hash = services.hash_senha(services.SENHA_RESET)
+        con.execute("UPDATE usuarios SET senha_hash=?, salt=?, must_change=1 WHERE id=?",
+                    (senha_hash, salt, alvo_id))
+        con.commit()
+        return {"login": alvo["login"], "senha_padrao": services.SENHA_RESET}
+
+    def definir_senha(self, con, uid, nova_senha):
+        """Define uma nova senha (troca obrigatória do 1º login); recusa repetir a senha atual."""
+        row = con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone()
+        if row is None:
+            raise ValueError("Usuário não encontrado.")
+        nova = (nova_senha or "").strip()
+        if len(nova) < 4:
+            raise ValueError("A nova senha deve ter ao menos 4 caracteres.")
+        if services.verifica_senha(nova, row["salt"], row["senha_hash"]):
+            raise ValueError("A nova senha não pode ser igual à atual.")
+        salt, senha_hash = services.hash_senha(nova)
+        con.execute("UPDATE usuarios SET senha_hash=?, salt=?, must_change=0 WHERE id=?",
+                    (senha_hash, salt, uid))
+        con.commit()
+        return self.get(con, uid)
 
 
 def sugestoes(con):

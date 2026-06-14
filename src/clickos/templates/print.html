@@ -76,8 +76,8 @@
   {% if empresa.slogan %}<div class="slogan">{{ empresa.slogan }}</div>{% endif %}
   <div class="tipo">{{ 'ORDEM DE SERVIÇO' if doc.tipo == 'os' else 'ORÇAMENTO' }}</div>
 
-  <!-- DADOS DO CLIENTE -->
-  <div class="sec mt">DADOS DO CLIENTE</div>
+  <!-- DADOS DA PESSOA -->
+  <div class="sec mt">DADOS DA PESSOA</div>
   <table class="fields">
     <tr>
       <td class="lbl" style="width:14%">Razão Social / Nome</td><td style="width:38%">{{ cliente.nome or doc.cliente_nome or '' }}</td>
@@ -214,7 +214,7 @@
   <!-- ASSINATURAS -->
   <table class="assin">
     <tr>
-      <td style="width:48%"><div class="line">Assinatura do Cliente — Nome / Data</div></td>
+      <td style="width:48%"><div class="line">Assinatura da Pessoa — Nome / Data</div></td>
       <td style="width:4%"></td>
       <td style="width:48%"><div class="line">Responsável pela Empresa — Nome / Data</div></td>
     </tr>

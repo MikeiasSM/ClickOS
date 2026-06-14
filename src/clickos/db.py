@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -115,8 +115,11 @@ CREATE TABLE IF NOT EXISTS cidades_custom (
 CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   login TEXT NOT NULL UNIQUE, nome TEXT, senha_hash TEXT, salt TEXT,
-  ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT
+  ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT,
+  avatar BLOB, must_change INTEGER NOT NULL DEFAULT 0
 );
+-- unicidade de login case-insensitive (reforça a regra "login sempre MAIÚSCULO/único")
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_login_nocase ON usuarios(login COLLATE NOCASE);
 """
 
 CATALOGO_EXEMPLO = [
@@ -161,6 +164,10 @@ def _migrate(con: sqlite3.Connection) -> None:
     if ver < 3:
         _add_column(con, "documentos", "usuario_id", "INTEGER")
         con.execute("UPDATE meta SET schema_version = 3")
+    if ver < 4:
+        _add_column(con, "usuarios", "avatar", "BLOB")
+        _add_column(con, "usuarios", "must_change", "INTEGER NOT NULL DEFAULT 0")
+        con.execute("UPDATE meta SET schema_version = 4")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)
