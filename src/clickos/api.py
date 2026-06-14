@@ -110,7 +110,17 @@ class Api:
             "niveis_combustivel": dbmod.NIVEIS_COMBUSTIVEL,
             "estado_geral": dbmod.ESTADO_GERAL_LISTA,
             "pecas": dbmod.LISTA_PECAS,
+            "preferencias": repo.get_preferencias(self.con),
+            "unidades_tempo": list(services.UNIDADES_SEG.keys()),
         }
+
+    @_api
+    def get_preferencias(self):
+        return repo.get_preferencias(self.con)
+
+    @_api
+    def save_preferencias(self, payload):
+        return repo.save_preferencias(self.con, payload or {})
 
     @_api
     def dashboard(self):
@@ -158,7 +168,9 @@ class Api:
     def list_documentos(self, filtro=None):
         filtro = filtro or {}
         return repo.documentos.list(self.con, tipo=filtro.get("tipo") or None,
-                                    status=filtro.get("status") or None, q=filtro.get("q") or None)
+                                    status=filtro.get("status") or None, q=filtro.get("q") or None,
+                                    data_ini=filtro.get("data_ini") or None,
+                                    data_fim=filtro.get("data_fim") or None)
 
     @_api
     def get_documento(self, did):

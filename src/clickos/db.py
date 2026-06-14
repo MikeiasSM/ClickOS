@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -83,10 +83,11 @@ CREATE TABLE IF NOT EXISTS documentos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   numero TEXT NOT NULL UNIQUE, tipo TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Aberta',
   prioridade TEXT DEFAULT 'Normal',
-  data_abertura TEXT, criado_em TEXT, atualizado_em TEXT,
+  data_abertura TEXT, criado_em TEXT, atualizado_em TEXT, previsao TEXT,
   cliente_id INTEGER REFERENCES clientes(id), veiculo_id INTEGER REFERENCES veiculos(id),
   km_entrada TEXT,
-  subtotal REAL DEFAULT 0, desconto_geral REAL DEFAULT 0, acrescimo REAL DEFAULT 0, total REAL DEFAULT 0,
+  subtotal REAL DEFAULT 0, desconto_geral REAL DEFAULT 0, desconto_tipo TEXT DEFAULT 'valor',
+  acrescimo REAL DEFAULT 0, total REAL DEFAULT 0,
   forma_pagamento TEXT, prazo_execucao TEXT, validade TEXT, observacoes TEXT,
   estado_geral TEXT, nivel_combustivel TEXT, obs_entrada TEXT,
   item_chave_principal INTEGER DEFAULT 0, item_chave_reserva INTEGER DEFAULT 0,
@@ -116,6 +117,10 @@ CREATE TABLE IF NOT EXISTS cidades_custom (
 
 CREATE TABLE IF NOT EXISTS valores_custom (
   tipo TEXT NOT NULL, valor TEXT NOT NULL, UNIQUE(tipo, valor)
+);
+
+CREATE TABLE IF NOT EXISTS preferencias (
+  chave TEXT PRIMARY KEY, valor TEXT
 );
 
 CREATE TABLE IF NOT EXISTS usuarios (
@@ -186,6 +191,10 @@ def _migrate(con: sqlite3.Connection) -> None:
     if ver < 7:
         con.execute("UPDATE documentos SET status='Faturada' WHERE tipo='os' AND status='Entregue'")
         con.execute("UPDATE meta SET schema_version = 7")
+    if ver < 8:
+        _add_column(con, "documentos", "desconto_tipo", "TEXT DEFAULT 'valor'")
+        _add_column(con, "documentos", "previsao", "TEXT")
+        con.execute("UPDATE meta SET schema_version = 8")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)

@@ -64,6 +64,35 @@ function fmtQtd(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFrac
 function today() { return new Date().toISOString().slice(0, 10); }
 function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
+function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function monthRange() { const d = new Date(); return { ini: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), fim: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) }; }
+/* texto "Orçamento válido por X dias" a partir das preferências */
+function validadeTexto(prefs) {
+  prefs = prefs || B.preferencias || {};
+  const q = num(prefs.orc_validade_qtd) || 0;
+  const L = { horas: ["hora", "horas"], dias: ["dia", "dias"], semanas: ["semana", "semanas"], meses: ["mês", "meses"] }[prefs.orc_validade_unidade] || ["dia", "dias"];
+  return "Orçamento válido por " + q + " " + (q === 1 ? L[0] : L[1]);
+}
+/* HTML da linha de desconto geral com alternância R$ / % */
+function descLineHtml(doc) {
+  const isPct = doc.desconto_tipo === "percent";
+  return `<div class="tot-line"><span class="muted">Desconto geral</span>
+    <span class="desc-wrap"><span class="muted small desc-eq" id="desc_eq"></span>
+      <input id="f_desc" class="money-in" style="width:120px;text-align:right" value="${doc.desconto_geral || 0}">
+      <span class="seg desc-seg"><button type="button" data-t="valor" class="${isPct ? "" : "on"}">R$</button><button type="button" data-t="percent" class="${isPct ? "on" : ""}">%</button></span></span></div>`;
+}
+/* Liga a alternância R$/% e o input #f_desc ao recalc. Devolve um getter do tipo atual. */
+function bindDescLine(recalc, tipoInicial) {
+  let tipo = tipoInicial === "percent" ? "percent" : "valor";
+  const seg = main().querySelector(".desc-seg"), fd = main().querySelector("#f_desc");
+  bindMoney(fd); fd.oninput = recalc;
+  seg.querySelectorAll("button").forEach(b => b.onclick = () => {
+    tipo = b.dataset.t; seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); recalc();
+  });
+  return () => tipo;
+}
+/* desconto resolvido em R$ (aplica % sobre o subtotal quando for o caso) */
+function descResolvido(sub, tipo) { const dv = num(val("#f_desc")); return tipo === "percent" ? sub * dv / 100 : dv; }
 function btn(label, icon, onclick, cls) { const b = h(`<button class="btn btn-sm ${cls || ""}">${icon ? ic(icon, 15) : ""}${label ? `<span>${esc(label)}</span>` : ""}</button>`); b.onclick = onclick; return b; }
 
 /* máscaras */
@@ -340,11 +369,14 @@ function donut(segments, opts) {
     <text x="${c}" y="${c + 19}" text-anchor="middle" font-size="13" fill="#64748b">OS</text></svg>`;
 }
 function statusClass(s) {
+  if (s === "Expirado") return "b-late";
   if (["Aberta", "Aberto"].includes(s)) return "b-aberta";
   if (["Em Execução"].includes(s)) return "b-os";
   if (["Concluída", "Faturada", "Aprovado"].includes(s)) return "b-green";
   return "b-gray";
 }
+/* badge "Atrasada" exibido em O.S. cuja previsão de entrega já passou (preferência) */
+function lateBadge(d) { return d && d.atrasado ? ' <span class="badge b-late">Atrasada</span>' : ""; }
 async function viewDashboard() {
   const d = await api("dashboard");
   const u = CURRENT_USER || {};
@@ -380,35 +412,70 @@ async function viewDashboard() {
   main().querySelector("#nc").onclick = () => formCliente(null);
 }
 
+/* barra de filtros: busca + período (datepickers início/fim, padrão = mês corrente) */
+function filtroBarHtml(r) {
+  return `<div class="filtros">
+    <div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, pessoa ou placa..."></div>
+    <div class="fdates"><label>De</label><input type="date" id="d_ini" value="${r.ini}"><label>até</label><input type="date" id="d_fim" value="${r.fim}"><button class="btn btn-sm" id="d_clear">Limpar</button></div>
+  </div>`;
+}
+function bindFiltros(reload) {
+  const di = main().querySelector("#d_ini"), df = main().querySelector("#d_fim");
+  main().querySelector("#q").addEventListener("input", reload);
+  di.addEventListener("change", reload); df.addEventListener("change", reload);
+  main().querySelector("#d_clear").onclick = () => { di.value = ""; df.value = ""; reload(); };
+}
+function filtroValores() {
+  return { q: val("#q"), data_ini: val("#d_ini"), data_fim: val("#d_fim") };
+}
+/* listagem como grid: Código | Pessoa | Veículo | Emissão | [Previsão] | Valor | Status | Ações */
+function renderDocsGrid(board, docs, onReload, isOS) {
+  const head = isOS
+    ? `<th>Código</th><th>Pessoa</th><th>Veículo</th><th>Emissão</th><th>Previsão</th><th class="r">Valor</th><th>Status</th><th></th>`
+    : `<th>Código</th><th>Pessoa</th><th>Veículo</th><th>Emissão</th><th class="r">Valor</th><th>Status</th><th></th>`;
+  const table = h(`<table class="grid-table"><thead><tr>${head}</tr></thead><tbody></tbody></table>`);
+  const tb = table.querySelector("tbody");
+  docs.forEach(d => {
+    const prio = d.prioridade || "Normal";
+    const veic = ((d.veiculo_placa || "") + (d.veiculo_marca ? " · " + d.veiculo_marca : "")).trim() || "—";
+    const stTxt = d.situacao || d.status;
+    const stCell = `<span class="badge ${statusClass(stTxt)}">${esc(stTxt)}</span>${isOS ? lateBadge(d) : ""}${prio !== "Normal" ? ` <span class="prio ${prio}">${prio}</span>` : ""}`;
+    const prevCell = isOS ? `<td class="${d.atrasado ? "td-late" : ""}">${d.previsao ? fmtDate(d.previsao) : "—"}</td>` : "";
+    const tr = h(`<tr${d.atrasado ? ' class="row-late"' : ""}>
+      <td class="mono">${esc(d.numero)}</td>
+      <td>${esc(d.cliente_nome || "—")}</td>
+      <td>${esc(veic)}</td>
+      <td>${fmtDate(d.data_abertura)}</td>
+      ${prevCell}
+      <td class="r money">${money(d.total)}</td>
+      <td>${stCell}</td>
+      <td class="r"><div class="acts"></div></td></tr>`);
+    const a = tr.querySelector(".acts");
+    a.appendChild(btn("", "eye", () => printPreview(d.id)));
+    a.appendChild(btn("", "edit", () => isOS ? openDocForm(d.id) : formOrcamento(d.id)));
+    if (isOS) a.appendChild(btn("", "printer", () => printDocumento(d.id)));
+    else if (!["Aprovado", "Recusado", "Cancelado"].includes(d.status)) a.appendChild(btn("", "repeat", () => efetivarOrcamento(d)));
+    a.appendChild(btn("", "trash", () => delDoc(d.id, onReload), "btn-danger"));
+    tb.appendChild(tr);
+  });
+  const card = h(`<div class="card grid-card"></div>`); card.appendChild(table);
+  board.appendChild(card); injectIcons(board);
+}
+
 /* ----------------------------------------------------------------- orçamentos (CRUD próprio) */
 async function viewOrcamentos() {
   render(`<div class="between"><div><h1 class="page-title">Orçamentos</h1><p class="page-sub">Propostas comerciais</p></div>
     <button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Novo Orçamento</span></button></div>
-    <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, pessoa ou placa..."></div></div>
+    <div class="card">${filtroBarHtml(monthRange())}</div>
     <div id="lista" class="mt"></div>`);
   main().querySelector("#novo").onclick = () => formOrcamento(null);
-  const q = main().querySelector("#q");
   async function reload() {
-    const docs = await api("list_documentos", { tipo: "orcamento", q: q.value.trim() });
+    const docs = await api("list_documentos", Object.assign({ tipo: "orcamento" }, filtroValores()));
     const lst = main().querySelector("#lista"); lst.innerHTML = "";
-    if (!docs.length) { lst.appendChild(emptyState("file", "Nenhum orçamento", "Crie um orçamento e, ao aprovar, efetive-o em Ordem de Serviço.", "Novo Orçamento", () => formOrcamento(null))); return; }
-    const list = h(`<div class="list-rows"></div>`);
-    docs.forEach(d => {
-      const prio = d.prioridade || "Normal";
-      const r = h(`<div class="list-row"><div class="grow">
-        <div style="font-weight:700">${esc(d.numero)} <span class="badge ${statusClass(d.status)}">${esc(d.status)}</span> ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}</div>
-        <div class="small muted">${esc(d.cliente_nome || "-")} · ${esc(d.veiculo_placa || "-")} · ${fmtDate(d.data_abertura)}</div></div>
-        <span class="money">${money(d.total)}</span><div class="acts"></div></div>`);
-      const a = r.querySelector(".acts");
-      a.appendChild(btn("", "eye", () => printPreview(d.id)));
-      a.appendChild(btn("", "edit", () => formOrcamento(d.id)));
-      if (!["Aprovado", "Recusado", "Cancelado"].includes(d.status)) a.appendChild(btn("", "repeat", () => efetivarOrcamento(d)));
-      a.appendChild(btn("", "trash", () => delDoc(d.id, viewOrcamentos), "btn-danger"));
-      list.appendChild(r);
-    });
-    lst.appendChild(list); injectIcons(lst);
+    if (!docs.length) { lst.appendChild(emptyState("file", "Nenhum orçamento no período", "Ajuste o período ou crie um novo orçamento.", "Novo Orçamento", () => formOrcamento(null))); return; }
+    renderDocsGrid(lst, docs, viewOrcamentos, false);
   }
-  q.addEventListener("input", reload);
+  bindFiltros(reload);
   reload();
 }
 
@@ -417,20 +484,19 @@ async function viewDocumentos() {
   const mode = vmode("docs", "kanban");
   render(`<div class="between"><div><h1 class="page-title">Ordens de Serviço</h1><p class="page-sub">Quadro de acompanhamento</p></div>
     <div class="row"><span id="vt"></span><button class="btn" id="fat">${ic("dollar", 16)}<span>Lançar faturada</span></button><button class="btn btn-primary" id="novo">${ic("plus", 16)}<span>Nova O.S.</span></button></div></div>
-    <div class="card"><div class="search">${ic("search", 16)}<input id="q" placeholder="Buscar por número, pessoa ou placa..."></div></div>
+    <div class="card">${filtroBarHtml(monthRange())}</div>
     <div id="board" class="mt"></div>`);
   main().querySelector("#vt").appendChild(viewToggle("docs", mode,
     [{ v: "kanban", icon: "columns", title: "Quadro" }, { v: "list", icon: "list", title: "Lista" }], () => viewDocumentos()));
   main().querySelector("#novo").onclick = () => openOS(null);
   main().querySelector("#fat").onclick = () => openOS(null, { faturada: true });
-  const q = main().querySelector("#q");
   async function reload() {
-    const docs = await api("list_documentos", { tipo: "os", q: q.value.trim() });
+    const docs = await api("list_documentos", Object.assign({ tipo: "os" }, filtroValores()));
     const board = main().querySelector("#board"); board.innerHTML = "";
-    if (!docs.length) { board.appendChild(emptyState("file", "Nenhuma O.S. encontrada", "Abra uma nova ordem de serviço.", "Nova O.S.", () => openOS(null))); return; }
-    if (mode === "list") renderDocsList(board, docs); else renderKanban(board, docs);
+    if (!docs.length) { board.appendChild(emptyState("file", "Nenhuma O.S. no período", "Ajuste o período ou abra uma nova ordem de serviço.", "Nova O.S.", () => openOS(null))); return; }
+    if (mode === "list") renderDocsGrid(board, docs, viewDocumentos, true); else renderKanban(board, docs);
   }
-  q.addEventListener("input", reload);
+  bindFiltros(reload);
   reload();
 }
 function renderDocsList(board, docs, onReload) {
@@ -466,9 +532,9 @@ function renderKanban(board, docs) {
 }
 function kcard(d) {
   const prio = d.prioridade || "Normal";
-  const card = h(`<div class="kcard pl-${esc(prio)}" draggable="true" data-id="${d.id}">
-    <div class="knum">${esc(d.veiculo_placa || "Sem veículo")} <span class="badge b-os">OS</span></div>
-    <div class="kmeta">${esc(((d.veiculo_marca || "") + " " + (d.veiculo_modelo || "")).trim() || "—")}<br>${esc(d.numero)} · ${esc(d.cliente_nome || "-")} · ${fmtDate(d.data_abertura)}</div>
+  const card = h(`<div class="kcard pl-${esc(prio)}${d.atrasado ? " kcard-late" : ""}" draggable="true" data-id="${d.id}">
+    <div class="knum">${esc(d.veiculo_placa || "Sem veículo")} <span class="badge b-os">OS</span>${lateBadge(d)}</div>
+    <div class="kmeta">${esc(((d.veiculo_marca || "") + " " + (d.veiculo_modelo || "")).trim() || "—")}<br>${esc(d.numero)} · ${esc(d.cliente_nome || "-")} · ${fmtDate(d.data_abertura)}${d.previsao ? " · prev. " + fmtDate(d.previsao) : ""}</div>
     <div class="kfoot"><span class="money">${money(d.total)}</span><span class="kmini">
       ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}
       <button data-a="ver" title="Ver">${ic("eye", 14)}</button><button data-a="edit" title="Abrir">${ic("edit", 14)}</button><button data-a="del" title="Excluir">${ic("trash", 14)}</button></span></div>`);
@@ -617,14 +683,14 @@ async function formOrcamento(id, opts) {
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
     tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: today(),
-    cliente_id: "", veiculo_id: "", desconto_geral: 0, acrescimo: 0, itens: [],
+    cliente_id: "", veiculo_id: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, itens: [],
     forma_pagamento: "", validade: "", observacoes: (B.empresa && B.empresa.termos_padrao) || "",
     usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
   }, opts.prefill || {});
   const itens = (doc.itens || []).map(i => ({ ...i }));
   render(`
     <div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
-      <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Orçamento</h1><p class="page-sub" style="margin:0">Proposta comercial</p></div></div>
+      <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Orçamento ${doc.expirado ? '<span class="badge b-late" style="font-size:12px;vertical-align:middle">Expirado</span>' : ""}</h1><p class="page-sub" style="margin:0">Proposta comercial</p></div></div>
     <div class="card mt"><h3 class="sec-title">Dados</h3>
       <div class="grid3"><div class="field"><label>Data</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
         <div class="field"><label>Status</label><div id="c_status"></div></div>
@@ -634,12 +700,12 @@ async function formOrcamento(id, opts) {
     <div class="card mt"><h3 class="sec-title">Itens</h3><div id="itens-box"></div>
       <hr class="sep">
       <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
-      <div class="tot-line"><span class="muted">Desconto geral</span><input id="f_desc" class="money-in" style="width:150px;text-align:right" value="${doc.desconto_geral || 0}"></div>
+      ${descLineHtml(doc)}
       <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
       <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
     <div class="card mt"><h3 class="sec-title">Condições</h3>
       <div class="grid2"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
-        <div class="field"><label>Validade</label><input id="f_val" value="${esc(doc.validade || "")}"></div></div>
+        <div class="field"><label>Validade</label><input id="f_val" readonly value="${esc(validadeTexto())}"><span class="hint muted small">Definida em Configurações → Preferências</span></div></div>
       <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div></div>
     <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancel">Cancelar</button>
       <div class="row">${id && !["Aprovado", "Recusado", "Cancelado"].includes(doc.status) ? `<button class="btn" id="efetivar">${ic("repeat", 16)}<span>Efetivar (criar O.S.)</span></button>` : ""}
@@ -648,18 +714,22 @@ async function formOrcamento(id, opts) {
   const prioCombo = selectCombo(B.prioridades, doc.prioridade || "Normal", null); main().querySelector("#c_prio").appendChild(prioCombo);
   const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null); main().querySelector("#c_pag").appendChild(pagCombo);
   const { cliCombo, veiCombo } = pickerPessoaVeiculo(main().querySelector("#c_cli"), main().querySelector("#c_vei"), clientes, veiculos, doc.cliente_id, doc.veiculo_id);
+  let getDescTipo = () => (doc.desconto_tipo === "percent" ? "percent" : "valor");
   const recalc = () => {
     const sub = itens.reduce((a, it) => a + (num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)), 0);
     main().querySelector("#t_sub").textContent = money(sub);
-    main().querySelector("#t_total").textContent = money(sub - num(val("#f_desc")) + num(val("#f_acr")));
+    const desc = descResolvido(sub, getDescTipo());
+    const eq = main().querySelector("#desc_eq"); if (eq) eq.textContent = getDescTipo() === "percent" ? "= " + money(desc) : "";
+    main().querySelector("#t_total").textContent = money(sub - desc + num(val("#f_acr")));
   };
   const ed = itensEditor(itens, cat, recalc); main().querySelector("#itens-box").appendChild(ed.el);
-  const fd = main().querySelector("#f_desc"), fa = main().querySelector("#f_acr"); bindMoney(fd); bindMoney(fa); fd.oninput = recalc; fa.oninput = recalc; recalc();
+  getDescTipo = bindDescLine(recalc, doc.desconto_tipo);
+  const fa = main().querySelector("#f_acr"); bindMoney(fa); fa.oninput = recalc; recalc();
   const payloadDe = () => ({ id: doc.id, tipo: "orcamento", status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: val("#f_data"),
     usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
     cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null,
-    desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
-    forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), validade: val("#f_val"), observacoes: val("#f_obs"),
+    desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")),
+    forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), validade: validadeTexto(), observacoes: val("#f_obs"),
     itens: itens.map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo, quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })), lataria: [] });
   main().querySelector("#back").onclick = () => setView("orcamentos");
   main().querySelector("#cancel").onclick = () => setView("orcamentos");
@@ -679,7 +749,7 @@ async function efetivarOrcamento(orc) {
   const full = orc.itens ? orc : await api("get_documento", orc.id);
   openOS(null, { prefill: {
     cliente_id: full.cliente_id, veiculo_id: full.veiculo_id, origem_orcamento_id: full.id,
-    desconto_geral: full.desconto_geral, acrescimo: full.acrescimo, forma_pagamento: full.forma_pagamento,
+    desconto_geral: full.desconto_geral, desconto_tipo: full.desconto_tipo, acrescimo: full.acrescimo, forma_pagamento: full.forma_pagamento,
     observacoes: full.observacoes, itens: itensDoOrcamento(full),
   }, fromOrcamento: full.numero });
 }
@@ -690,8 +760,8 @@ async function openOS(id, opts) {
   setActive("documentos");
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
-    tipo: "os", status: opts.faturada ? "Faturada" : "Aberta", prioridade: "Normal", data_abertura: today(),
-    cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, acrescimo: 0, itens: [], lataria: [],
+    tipo: "os", status: opts.faturada ? "Faturada" : "Aberta", prioridade: "Normal", data_abertura: today(), previsao: "",
+    cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, itens: [], lataria: [],
     forma_pagamento: "", observacoes: "", estado_geral: "", nivel_combustivel: "", obs_entrada: "", ocorrencia: "",
     parecer_mecanico: "", mecanico: "", faturado_em: "", origem_orcamento_id: null,
     item_chave_principal: 0, item_chave_reserva: 0, item_documento: 0, item_manual: 0,
@@ -717,7 +787,7 @@ async function openOS(id, opts) {
     <div class="between"><div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
       <div><h1 class="page-title" style="font-size:24px">${titulo}${id ? " " + esc(doc.numero) : ""}</h1>
         <p class="page-sub" style="margin:0">${esc(doc.cliente_nome || "Nova")} ${doc.veiculo_placa ? "· " + esc(doc.veiculo_placa) : ""}${opts.fromOrcamento ? " · do orçamento " + esc(opts.fromOrcamento) : ""}</p></div></div>
-      <span class="badge ${statusClass(st)}" style="align-self:center;font-size:13px;padding:6px 12px">${esc(st)}</span></div>
+      <span style="align-self:center"><span class="badge ${statusClass(st)}" style="font-size:13px;padding:6px 12px">${esc(st)}</span>${lateBadge(doc)}</span></div>
 
     <div class="wiz-steps mt" id="osstep">${passos.map((p, i) => `<span class="wiz-pill ${i === idxAtual ? "on" : i < idxAtual ? "done" : ""}">${i + 1}. ${esc(p[1])}</span>`).join("")} ${isCancel ? '<span class="wiz-pill" style="background:#fee2e2;color:#991b1b">Cancelada</span>' : ""}</div>
 
@@ -728,7 +798,8 @@ async function openOS(id, opts) {
         <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
-      <div class="grid2"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div></div></div>
+      <div class="grid2"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
+        <div class="field"><label>Previsão de Entrega</label><input type="date" id="f_prev" value="${esc((doc.previsao || "").slice(0, 10))}"><span class="hint muted small">Opcional — usada para sinalizar atraso</span></div></div></div>
 
     <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Checklist de Entrada</h3>${ic("chevron", 18)}</div>
       <div class="acc-body"><div class="muted small" style="margin:8px 0">Marque o estado de cada item da lataria.</div>
@@ -748,7 +819,7 @@ async function openOS(id, opts) {
     <div class="card mt" id="card-itens" style="${verItens ? "" : "display:none"}"><h3 class="sec-title">Serviços e Produtos</h3><div id="itens-box"></div>
       <hr class="sep">
       <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
-      <div class="tot-line"><span class="muted">Desconto geral</span><input id="f_desc" class="money-in" style="width:150px;text-align:right" value="${doc.desconto_geral || 0}"></div>
+      ${descLineHtml(doc)}
       <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
       <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
 
@@ -789,21 +860,26 @@ async function openOS(id, opts) {
   });
 
   // itens (serviços)
+  let getDescTipo = () => (doc.desconto_tipo === "percent" ? "percent" : "valor");
   const recalc = () => {
     const sub = itens.reduce((a, it) => a + (num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)), 0);
     const ts = main().querySelector("#t_sub"); if (!ts) return;
     ts.textContent = money(sub);
-    main().querySelector("#t_total").textContent = money(sub - num(val("#f_desc")) + num(val("#f_acr")));
+    const desc = descResolvido(sub, getDescTipo());
+    const eq = main().querySelector("#desc_eq"); if (eq) eq.textContent = getDescTipo() === "percent" ? "= " + money(desc) : "";
+    main().querySelector("#t_total").textContent = money(sub - desc + num(val("#f_acr")));
   };
   const ed = itensEditor(itens, cat, recalc); main().querySelector("#itens-box").appendChild(ed.el);
-  const fd = main().querySelector("#f_desc"), fa = main().querySelector("#f_acr"); bindMoney(fd); bindMoney(fa); fd.oninput = recalc; fa.oninput = recalc; recalc();
+  getDescTipo = bindDescLine(recalc, doc.desconto_tipo);
+  const fa = main().querySelector("#f_acr"); bindMoney(fa); fa.oninput = recalc; recalc();
 
   // payload do estado atual do formulário (com status escolhido)
   const payloadDe = (status) => ({
     id: doc.id, tipo: "os", status, prioridade: prioCombo._value(), data_abertura: val("#f_data"),
     usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
     cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
-    desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
+    previsao: val("#f_prev"),
+    desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")),
     forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: doc.prazo_execucao || "", validade: doc.validade || "",
     observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel,
     obs_entrada: val("#f_obsent"), ocorrencia: val("#f_ocor"), mecanico: val("#f_mec"), parecer_mecanico: val("#f_parecer"),
@@ -1285,6 +1361,7 @@ async function viewConfiguracoes(tab) {
   render(`<h1 class="page-title">Configurações</h1><p class="page-sub">Empresa, usuários e backup do sistema</p>
     <div class="tabs" id="cfgtabs">
       <button data-tab="empresa">${ic("building", 16)}<span>Empresa</span></button>
+      <button data-tab="preferencias">${ic("settings", 16)}<span>Preferências</span></button>
       <button data-tab="usuarios">${ic("shield", 16)}<span>Usuários</span></button>
       <button data-tab="backup">${ic("save", 16)}<span>Backup e Restauração</span></button>
     </div>
@@ -1294,8 +1371,45 @@ async function viewConfiguracoes(tab) {
   const body = main().querySelector("#cfgbody");
   body.innerHTML = '<div class="empty">Carregando…</div>';
   if (tab === "empresa") await renderEmpresa(body);
+  else if (tab === "preferencias") await renderPreferencias(body);
   else if (tab === "usuarios") await renderUsuarios(body);
   else renderBackup(body);
+}
+
+/* ----------------------------------------------------------------- preferências (aba de Configurações) */
+async function renderPreferencias(container) {
+  const prefs = await api("get_preferencias");
+  const unidades = B.unidades_tempo || ["horas", "dias", "semanas", "meses"];
+  const uOpts = (sel) => unidades.map(u => `<option value="${u}" ${u === sel ? "selected" : ""}>${u}</option>`).join("");
+  container.innerHTML = `
+    <div class="card"><h3 class="sec-title">Orçamentos</h3>
+      <p class="muted" style="margin:0 0 14px">Prazo de validade padrão dos orçamentos. Depois desse prazo, um orçamento em aberto passa a ser exibido como <b>Expirado</b> nas listagens.</p>
+      <div class="pref-row"><label>Validade padrão</label>
+        <input type="number" min="1" id="p_orc_qtd" class="pref-num" value="${esc(prefs.orc_validade_qtd)}">
+        <select id="p_orc_uni" class="pref-sel">${uOpts(prefs.orc_validade_unidade)}</select></div>
+      <div class="pref-preview" id="p_orc_prev"></div></div>
+
+    <div class="card mt"><h3 class="sec-title">Ordens de Serviço</h3>
+      <p class="muted" style="margin:0 0 14px">Tolerância de atraso. Quando a <b>Previsão de Entrega</b> de uma O.S. é ultrapassada por mais que este tempo, ela é sinalizada como <b>Atrasada</b> no quadro e nas listagens.</p>
+      <div class="pref-row"><label>Sinalizar atraso após</label>
+        <input type="number" min="0" id="p_os_qtd" class="pref-num" value="${esc(prefs.os_atraso_qtd)}">
+        <select id="p_os_uni" class="pref-sel">${uOpts(prefs.os_atraso_unidade)}</select>
+        <span class="muted small">além da previsão</span></div></div>
+
+    <div class="between mt"><span></span><button class="btn btn-primary" id="p_save">${ic("save", 16)}<span>Salvar preferências</span></button></div>`;
+  injectIcons(container);
+  const prev = () => { container.querySelector("#p_orc_prev").textContent = validadeTexto({ orc_validade_qtd: val("#p_orc_qtd"), orc_validade_unidade: container.querySelector("#p_orc_uni").value }); };
+  container.querySelector("#p_orc_qtd").addEventListener("input", prev);
+  container.querySelector("#p_orc_uni").addEventListener("change", prev);
+  prev();
+  container.querySelector("#p_save").onclick = async () => {
+    const payload = {
+      orc_validade_qtd: val("#p_orc_qtd") || "0", orc_validade_unidade: container.querySelector("#p_orc_uni").value,
+      os_atraso_qtd: val("#p_os_qtd") || "0", os_atraso_unidade: container.querySelector("#p_os_uni").value,
+    };
+    B.preferencias = await api("save_preferencias", payload);
+    toast("Preferências salvas", "ok");
+  };
 }
 function renderBackup(container) {
   container.innerHTML = `

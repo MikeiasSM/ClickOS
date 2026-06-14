@@ -380,3 +380,46 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .user-role{font-size:11px;color:var(--muted)}
 .user-logout{border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px;cursor:pointer;color:#475569;display:flex;flex:none}
 .user-logout:hover{background:#fef2f2;color:var(--red);border-color:#fecaca}
+
+/* ---- Wave 2: desconto R$/%, filtros, grid de listagem, atraso, preferências ---- */
+/* alternância de desconto (R$ / %) na linha de totais */
+.desc-wrap{display:inline-flex;align-items:center;gap:8px}
+.desc-eq{min-width:60px;text-align:right}
+.desc-seg button{padding:4px 11px;font-weight:600;color:#475569}
+.desc-seg button.on{background:var(--blue);color:#fff}
+.field .hint{display:block;margin-top:4px;color:var(--muted)}
+
+/* barra de filtros (busca + período) */
+.filtros{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.filtros .search{flex:1;min-width:240px}
+.fdates{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.fdates label{font-size:12px;color:var(--muted)}
+.fdates input[type=date]{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:13px}
+
+/* listagem em grid (tabela) */
+.grid-card{padding:0;overflow:hidden}
+.grid-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.grid-table th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+  font-weight:700;padding:11px 12px;border-bottom:1px solid var(--line);background:#fafbfc}
+.grid-table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.grid-table tbody tr:last-child td{border-bottom:0}
+.grid-table tbody tr:hover{background:#fafbfc}
+.grid-table .r{text-align:right}
+.grid-table td.money{font-weight:700;white-space:nowrap}
+.grid-table td.mono{font-weight:700;white-space:nowrap}
+.grid-table .acts{display:inline-flex;gap:6px;justify-content:flex-end}
+.grid-table tr.row-late{background:#fff7ed}
+.grid-table tr.row-late:hover{background:#ffedd5}
+.grid-table td.td-late{color:#b45309;font-weight:700}
+
+/* sinalização de atraso */
+.b-late{background:#ffe4e6;color:#9f1239}
+.kcard-late{border-left-color:#e11d48 !important}
+
+/* preferências */
+.pref-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0}
+.pref-row>label{min-width:150px;font-weight:600;font-size:13px;color:#334155}
+.pref-num{width:90px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;text-align:right}
+.pref-sel{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.pref-preview{margin-top:10px;font-weight:600;color:var(--blue);background:#eff6ff;border:1px dashed #bfdbfe;
+  border-radius:8px;padding:9px 12px;display:inline-block}

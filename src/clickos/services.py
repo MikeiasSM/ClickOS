@@ -85,14 +85,60 @@ def line_liquido(qtd, bruto, desconto) -> float:
     return round(_num(qtd) * _num(bruto) - _num(desconto), 2)
 
 
-def compute_totals(itens, desconto_geral=0, acrescimo=0) -> dict:
-    """Subtotal (soma dos líquidos) e total (subtotal - desconto geral + acréscimo)."""
+def desconto_resolvido(subtotal, desconto_geral, desconto_tipo="valor") -> float:
+    """Converte o desconto geral em R$. Quando 'percent', aplica o percentual sobre o subtotal."""
+    if (desconto_tipo or "valor") == "percent":
+        return round(_num(subtotal) * _num(desconto_geral) / 100.0, 2)
+    return round(_num(desconto_geral), 2)
+
+
+def compute_totals(itens, desconto_geral=0, acrescimo=0, desconto_tipo="valor") -> dict:
+    """Subtotal (soma dos líquidos) e total (subtotal - desconto geral + acréscimo).
+    O desconto geral pode ser em R$ ('valor') ou percentual ('percent')."""
     subtotal = round(
         sum(line_liquido(i.get("quantidade"), i.get("valor_unitario"), i.get("desconto")) for i in itens),
         2,
     )
-    total = round(subtotal - _num(desconto_geral) + _num(acrescimo), 2)
-    return {"subtotal": subtotal, "total": total}
+    desc = desconto_resolvido(subtotal, desconto_geral, desconto_tipo)
+    total = round(subtotal - desc + _num(acrescimo), 2)
+    return {"subtotal": subtotal, "total": total, "desconto_valor": desc}
+
+
+# ----------------------------------------------------------------- datas / durações (preferências)
+UNIDADES_SEG = {"horas": 3600, "dias": 86400, "semanas": 604800, "meses": 2592000}
+_UNIDADE_SINGULAR = {"horas": "hora", "dias": "dia", "semanas": "semana", "meses": "mês"}
+_UNIDADE_PLURAL = {"horas": "horas", "dias": "dias", "semanas": "semanas", "meses": "meses"}
+
+
+def parse_dt(s):
+    """Lê uma data/datetime ISO tolerando 'YYYY-MM-DD' ou 'YYYY-MM-DDTHH:MM:SS'. Retorna datetime|None."""
+    if not s:
+        return None
+    from datetime import datetime
+    s = str(s).strip()
+    for cand in (s, s[:19], s[:10]):
+        try:
+            return datetime.fromisoformat(cand)
+        except ValueError:
+            continue
+    return None
+
+
+def duracao_segundos(qtd, unidade) -> float:
+    return _num(qtd) * UNIDADES_SEG.get(unidade, UNIDADES_SEG["dias"])
+
+
+def duracao_texto(qtd, unidade) -> str:
+    """Ex.: (15, 'dias') -> '15 dias'; (1, 'semana') -> '1 semana'."""
+    q = _num(qtd)
+    n = int(q) if q == int(q) else q
+    if q == 1:
+        return f"{n} {_UNIDADE_SINGULAR.get(unidade, 'dia')}"
+    return f"{n} {_UNIDADE_PLURAL.get(unidade, 'dias')}"
+
+
+def validade_texto(qtd, unidade) -> str:
+    return f"Orçamento válido por {duracao_texto(qtd, unidade)}"
 
 
 def convert_to_os(con, orcamento_id: int, stamp: str | None = None) -> dict:
@@ -113,6 +159,7 @@ def convert_to_os(con, orcamento_id: int, stamp: str | None = None) -> dict:
         "veiculo_id": orc.get("veiculo_id"),
         "km_entrada": orc.get("km_entrada"),
         "desconto_geral": orc.get("desconto_geral", 0),
+        "desconto_tipo": orc.get("desconto_tipo", "valor"),
         "acrescimo": orc.get("acrescimo", 0),
         "forma_pagamento": orc.get("forma_pagamento"),
         "prazo_execucao": orc.get("prazo_execucao"),

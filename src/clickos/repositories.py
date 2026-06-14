@@ -160,12 +160,70 @@ class _Itens:
         con.commit()
 
 
+# --------------------------------------------------------------------------- preferências
+from datetime import timedelta
+
+PREF_DEFAULTS = {
+    "orc_validade_qtd": "15",
+    "orc_validade_unidade": "dias",
+    "os_atraso_qtd": "1",
+    "os_atraso_unidade": "dias",
+}
+
+
+def get_preferencias(con) -> dict:
+    """Preferências do sistema (mescla os padrões com o que estiver salvo)."""
+    out = dict(PREF_DEFAULTS)
+    for r in con.execute("SELECT chave, valor FROM preferencias"):
+        if r[1] is not None:
+            out[r[0]] = r[1]
+    return out
+
+
+def save_preferencias(con, data) -> dict:
+    for chave, valor in (data or {}).items():
+        if chave in PREF_DEFAULTS:
+            con.execute(
+                "INSERT INTO preferencias(chave, valor) VALUES (?, ?) "
+                "ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor",
+                (chave, "" if valor is None else str(valor)))
+    con.commit()
+    return get_preferencias(con)
+
+
+def _anota_situacao(d, prefs, agora):
+    """Anota campos derivados no documento (não persistidos):
+    desconto_valor (R$ resolvido), expirado (orçamento), atrasado (O.S.) e situacao (status p/ exibir)."""
+    sub, tot = services._num(d.get("subtotal")), services._num(d.get("total"))
+    acr = services._num(d.get("acrescimo"))
+    d["desconto_valor"] = round(sub + acr - tot, 2)  # deriva do que já foi gravado
+    d["expirado"] = False
+    d["atrasado"] = False
+    d["situacao"] = d.get("status")
+    if d.get("tipo") == "orcamento" and d.get("status") == "Aberto":
+        dt = services.parse_dt(d.get("data_abertura"))
+        if dt is not None:
+            limite = dt + timedelta(seconds=services.duracao_segundos(
+                prefs.get("orc_validade_qtd"), prefs.get("orc_validade_unidade")))
+            if agora > limite:
+                d["expirado"] = True
+                d["situacao"] = "Expirado"
+    elif d.get("tipo") == "os" and d.get("status") in ("Aberta", "Em Execução", "Concluída"):
+        pv = services.parse_dt(d.get("previsao"))
+        if pv is not None:
+            limite = pv + timedelta(seconds=services.duracao_segundos(
+                prefs.get("os_atraso_qtd"), prefs.get("os_atraso_unidade")))
+            if agora > limite:
+                d["atrasado"] = True
+    return d
+
+
 # --------------------------------------------------------------------------- documentos
 class _Documentos:
-    HEAD = ["tipo", "status", "prioridade", "data_abertura", "cliente_id", "veiculo_id", "km_entrada",
-            "desconto_geral", "acrescimo", "forma_pagamento", "prazo_execucao", "validade",
-            "observacoes", "estado_geral", "nivel_combustivel", "obs_entrada",
-            "item_chave_principal", "item_chave_reserva", "item_documento", "item_manual",
+    HEAD = ["tipo", "status", "prioridade", "data_abertura", "previsao", "cliente_id", "veiculo_id",
+            "km_entrada", "desconto_geral", "desconto_tipo", "acrescimo", "forma_pagamento",
+            "prazo_execucao", "validade", "observacoes", "estado_geral", "nivel_combustivel",
+            "obs_entrada", "item_chave_principal", "item_chave_reserva", "item_documento", "item_manual",
             "origem_orcamento_id", "usuario_id",
             "ocorrencia", "parecer_mecanico", "mecanico"]  # faturado_em é carimbado pelo sistema
 
@@ -176,10 +234,12 @@ class _Documentos:
         data.setdefault("status", "Aberta" if data["tipo"] == "os" else "Aberto")
         data.setdefault("prioridade", "Normal")
         data.setdefault("desconto_geral", 0)
+        data.setdefault("desconto_tipo", "valor")
         data.setdefault("acrescimo", 0)
         numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))
         itens = data.get("itens") or []
-        tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"))
+        tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
+                                      data.get("desconto_tipo"))
         cols = ["numero"] + self.HEAD + ["subtotal", "total", "criado_em", "atualizado_em"]
         vals = [numero] + [data.get(f) for f in self.HEAD] + [tot["subtotal"], tot["total"], now, now]
         cur = con.execute(f"INSERT INTO documentos({','.join(cols)}) VALUES({','.join('?'*len(cols))})", vals)
@@ -196,7 +256,8 @@ class _Documentos:
         itens = data.get("itens") or []
         if data.get("status") == "Faturada" and not itens:
             raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
-        tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"))
+        tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
+                                      data.get("desconto_tipo"))
         # só grava as colunas presentes no payload (preserva as demais — evita zerar campos não enviados)
         campos = [f for f in self.HEAD if f in data]
         sets = ",".join(f"{f}=?" for f in campos) + ",subtotal=?,total=?,atualizado_em=?"
@@ -257,9 +318,10 @@ class _Documentos:
             "SELECT * FROM documento_itens WHERE documento_id=? ORDER BY ordem", (did,)).fetchall())
         d["lataria"] = _rows(con.execute(
             "SELECT * FROM documento_lataria WHERE documento_id=? ORDER BY ordem", (did,)).fetchall())
+        _anota_situacao(d, get_preferencias(con), datetime.now())
         return d
 
-    def list(self, con, tipo=None, status=None, q=None):
+    def list(self, con, tipo=None, status=None, q=None, data_ini=None, data_fim=None):
         sql = ("SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa, "
                "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo, u.nome AS usuario_nome "
                "FROM documentos d LEFT JOIN clientes c ON c.id=d.cliente_id "
@@ -270,12 +332,20 @@ class _Documentos:
             sql += " AND d.tipo=?"; args.append(tipo)
         if status:
             sql += " AND d.status=?"; args.append(status)
+        if data_ini:
+            sql += " AND substr(COALESCE(d.data_abertura,''),1,10) >= ?"; args.append(str(data_ini)[:10])
+        if data_fim:
+            sql += " AND substr(COALESCE(d.data_abertura,''),1,10) <= ?"; args.append(str(data_fim)[:10])
         if q:
             like = f"%{q}%"
             sql += " AND (d.numero LIKE ? OR c.nome LIKE ? OR v.placa LIKE ?)"
             args += [like, like, like]
         sql += " ORDER BY d.id DESC"
-        return _rows(con.execute(sql, args).fetchall())
+        rows = _rows(con.execute(sql, args).fetchall())
+        prefs, agora = get_preferencias(con), datetime.now()
+        for d in rows:
+            _anota_situacao(d, prefs, agora)
+        return rows
 
     def delete(self, con, did):
         con.execute("DELETE FROM documentos WHERE id=?", (did,))
