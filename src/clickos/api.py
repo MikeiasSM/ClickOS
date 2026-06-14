@@ -161,8 +161,7 @@ class Api:
     def converter_os(self, did):
         return services.convert_to_os(self.con, did, stamp=_stamp())
 
-    @_api
-    def print_documento(self, did):
+    def _render(self, did):
         doc = repo.documentos.get(self.con, did)
         if not doc:
             raise ValueError("Documento não encontrado.")
@@ -172,6 +171,11 @@ class Api:
         html = printing.render_documento(
             doc, empresa, cliente, veiculo,
             gerado_em=datetime.now().strftime("%d/%m/%Y às %H:%M"))
+        return doc, html
+
+    @_api
+    def print_documento(self, did):
+        doc, html = self._render(did)
         return {"html": html, "numero": doc["numero"]}
 
     # ----------------------------------------------------------------- clientes

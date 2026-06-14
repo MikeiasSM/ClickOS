@@ -196,17 +196,30 @@ function comboText(items, value, opt) {
   return wrap;
 }
 
+/* dropdown customizado para listas fixas (substitui o <select> nativo).
+   options: array de strings OU {value,label}. _value() retorna o valor selecionado. */
+function selectCombo(options, value, onChange, opts) {
+  opts = opts || {};
+  const items = options.map(o => (typeof o === "string" ? { id: o, nome: o } : { id: o.value, nome: o.label }));
+  return comboSelect(items, value == null ? null : value, {
+    placeholder: opts.placeholder || "Selecione...", getLabel: x => x.nome,
+    onSelect: id => onChange && onChange(id),
+  });
+}
+
 /* popup de cadastro de cidade com seleção de UF (entre as existentes — nunca novo estado) */
 function cadastrarCidade(nome, onDone) {
   const m = h(`<div class="modal" style="width:440px"><button class="close">×</button><h3>Cadastrar cidade</h3>
     <div class="grid2"><div class="field"><label>Cidade *</label><input id="cn" value="${esc(nome)}"></div>
-      <div class="field"><label>Estado (UF) *</label><select id="cu">${(B.ufs || []).map(u => `<option>${u}</option>`).join("")}</select></div></div>
+      <div class="field"><label>Estado (UF) *</label><div id="c_uf"></div></div></div>
     <div class="muted small">A UF deve ser uma das existentes — não é possível criar um novo estado.</div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Adicionar</button></div></div>`);
   const bg = openModal(m);
+  const ufCombo = selectCombo(B.ufs || [], (B.ufs || [])[0] || "", null);
+  m.querySelector("#c_uf").appendChild(ufCombo);
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
   m.querySelector("#sv").onclick = async () => {
-    const nm = val("#cn", m), uf = val("#cu", m);
+    const nm = val("#cn", m), uf = ufCombo._value();
     if (!nm) { toast("Informe a cidade", "err"); return; }
     await api("add_cidade", { nome: nm, uf }); bg.remove(); if (onDone) onDone(nm, uf);
   };
@@ -248,22 +261,24 @@ function barChart(data) {
 function donut(segments, opts) {
   opts = opts || {};
   const total = segments.reduce((a, s) => a + s.value, 0);
-  const size = opts.size || 200, sw = opts.stroke || 30, r = (size - sw) / 2, c = size / 2, C = 2 * Math.PI * r;
+  const size = opts.size || 190, sw = opts.stroke || 18, r = (size - sw) / 2, c = size / 2, C = 2 * Math.PI * r;
   const nz = segments.filter(s => s.value > 0).length;
-  const gap = nz > 1 ? Math.min(C * 0.05, sw * 0.9) : 0;  // folga entre fatias (pontas arredondadas)
+  const gapVis = 1.5;                      // gap visível (~1-2px)
   let off = 0, arcs = "";
   segments.forEach(s => {
     const len = total ? (s.value / total) * C : 0;
-    if (len > 0) {
-      const drawn = Math.max(0.1, len - gap);
-      arcs += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${drawn.toFixed(2)} ${(C - drawn).toFixed(2)}" stroke-dashoffset="${(-(off + gap / 2)).toFixed(2)}"></circle>`;
+    if (len > 0.5) {
+      // pontas arredondadas (linecap=round avança sw/2); reduz o arco para deixar gap pequeno entre fatias
+      const g = nz > 1 ? Math.min(sw + gapVis, len * 0.55) : 0;
+      const drawn = Math.max(0.5, len - g);
+      arcs += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${drawn.toFixed(2)} ${(C - drawn).toFixed(2)}" stroke-dashoffset="${(-(off + g / 2)).toFixed(2)}"></circle>`;
     }
     off += len;
   });
   return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
     <g transform="rotate(-90 ${c} ${c})"><circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="${sw}"></circle>${arcs}</g>
-    <text x="${c}" y="${c - 2}" text-anchor="middle" font-size="34" font-weight="800" fill="#111827">${total}</text>
-    <text x="${c}" y="${c + 20}" text-anchor="middle" font-size="13" fill="#64748b">OS</text></svg>`;
+    <text x="${c}" y="${c - 2}" text-anchor="middle" font-size="32" font-weight="800" fill="#111827">${total}</text>
+    <text x="${c}" y="${c + 19}" text-anchor="middle" font-size="13" fill="#64748b">OS</text></svg>`;
 }
 function statusClass(s) {
   if (["Aberta", "Aberto"].includes(s)) return "b-aberta";
@@ -293,7 +308,7 @@ async function viewDashboard() {
   main().querySelector("#chart").appendChild(barChart(d.fat_meses || []));
   const cores = { "Aberta": "#f59e0b", "Em Execução": "#2563eb", "Concluída": "#16a34a" };
   const segs = Object.entries(d.pipeline || {}).map(([k, v]) => ({ label: k, value: v, color: cores[k] || "#94a3b8" }));
-  main().querySelector("#donut").innerHTML = donut(segs, { size: 200, stroke: 30 });
+  main().querySelector("#donut").innerHTML = donut(segs, { size: 190, stroke: 18 });
   const legend = main().querySelector("#legend");
   segs.forEach(s => legend.appendChild(h(`<div class="leg-row"><span class="leg-dot" style="background:${s.color}"></span><span class="leg-label">${esc(s.label)}</span><b>${s.value}</b></div>`)));
   const rec = main().querySelector("#recent");
@@ -359,8 +374,8 @@ function renderKanban(board, docs) {
 function kcard(d) {
   const prio = d.prioridade || "Normal";
   const card = h(`<div class="kcard pl-${esc(prio)}" draggable="true" data-id="${d.id}">
-    <div class="knum">${esc(d.numero)} ${d.tipo === "os" ? '<span class="badge b-os">OS</span>' : '<span class="badge b-orc">Orçamento</span>'}</div>
-    <div class="kmeta">${esc(d.cliente_nome || "-")}<br>${esc(d.veiculo_placa || "-")} · ${fmtDate(d.data_abertura)}</div>
+    <div class="knum">${esc(d.veiculo_placa || "Sem veículo")} ${d.tipo === "os" ? '<span class="badge b-os">OS</span>' : '<span class="badge b-orc">Orçamento</span>'}</div>
+    <div class="kmeta">${esc(((d.veiculo_marca || "") + " " + (d.veiculo_modelo || "")).trim() || "—")}<br>${esc(d.numero)} · ${esc(d.cliente_nome || "-")} · ${fmtDate(d.data_abertura)}</div>
     <div class="kfoot"><span class="money">${money(d.total)}</span><span class="kmini">
       ${prio !== "Normal" ? `<span class="prio ${prio}">${prio}</span>` : ""}
       <button data-a="ver" title="Ver">${ic("eye", 14)}</button><button data-a="edit" title="Editar">${ic("edit", 14)}</button></span></div>`);
@@ -407,11 +422,9 @@ async function openDocForm(id) {
 
     <div class="card mt"><h3 class="sec-title">Dados Principais</h3>
       <div class="grid3">
-        <div class="field"><label>Tipo</label><select id="f_tipo">
-          <option value="orcamento" ${doc.tipo === "orcamento" ? "selected" : ""}>Orçamento</option>
-          <option value="os" ${doc.tipo === "os" ? "selected" : ""}>Ordem de Serviço</option></select></div>
-        <div class="field"><label>Status</label><select id="f_status">${statusOptions(doc.tipo, doc.status)}</select></div>
-        <div class="field"><label>Prioridade</label><select id="f_prio">${B.prioridades.map(p => `<option ${p === doc.prioridade ? "selected" : ""}>${p}</option>`).join("")}</select></div>
+        <div class="field"><label>Tipo</label><div id="c_tipo"></div></div>
+        <div class="field"><label>Status</label><div id="c_status"></div></div>
+        <div class="field"><label>Prioridade</label><div id="c_prio"></div></div>
       </div>
       <div class="grid3">
         <div class="field"><label>Data de Abertura</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
@@ -436,7 +449,7 @@ async function openDocForm(id) {
       <div class="muted small" style="margin-bottom:6px">Lataria (marque OK ou Avaria)</div>
       <div class="lataria" id="lataria"></div>
       <div class="grid2 mt">
-        <div class="field"><label>Estado Geral</label><select id="f_estado"><option value="">—</option>${B.estado_geral.map(s => `<option ${s === doc.estado_geral ? "selected" : ""}>${s}</option>`).join("")}</select></div>
+        <div class="field"><label>Estado Geral</label><div id="c_estado"></div></div>
         <div class="field"><label>Nível de Combustível</label><div class="chips" id="nivel"></div></div>
       </div>
       <div class="field"><label>Itens Entregues</label><div class="checks">
@@ -450,7 +463,7 @@ async function openDocForm(id) {
 
     <div class="card mt"><h3 class="sec-title">Condições Comerciais</h3>
       <div class="grid3">
-        <div class="field"><label>Forma de Pagamento</label><select id="f_pag"><option value="">—</option>${B.formas_pagamento.map(s => `<option ${s === doc.forma_pagamento ? "selected" : ""}>${s}</option>`).join("")}</select></div>
+        <div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
         <div class="field"><label>Prazo de Execução</label><input id="f_prazo" value="${esc(doc.prazo_execucao || "")}"></div>
         <div class="field"><label>Validade do Orçamento</label><input id="f_val" value="${esc(doc.validade || "")}"></div>
       </div>
@@ -460,23 +473,47 @@ async function openDocForm(id) {
     <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancel">Cancelar</button>
       <button class="btn btn-primary" id="salvar">${ic("save", 16)}<span>Salvar Documento</span></button></div>`);
 
-  // tipo -> status options + checklist somente em OS
-  const fTipo = main().querySelector("#f_tipo"), fStatus = main().querySelector("#f_status");
+  // dropdowns customizados (Tipo / Status / Prioridade / Estado Geral / Forma de Pagamento)
   const checklistCard = main().querySelector("#checklist-card");
-  const toggleChecklist = () => { checklistCard.style.display = fTipo.value === "os" ? "" : "none"; };
-  fTipo.onchange = () => { fStatus.innerHTML = statusOptions(fTipo.value, ""); toggleChecklist(); };
-  toggleChecklist();
+  const toggleChecklist = tipo => { checklistCard.style.display = tipo === "os" ? "" : "none"; };
+  const statusBox = main().querySelector("#c_status");
+  let statusCombo;
+  const buildStatus = (tipo, current) => {
+    statusBox.innerHTML = "";
+    const lista = tipo === "os" ? B.status_os : B.status_orcamento;
+    statusCombo = selectCombo(lista, current || lista[0], null);
+    statusBox.appendChild(statusCombo);
+  };
+  const tipoCombo = selectCombo([{ value: "orcamento", label: "Orçamento" }, { value: "os", label: "Ordem de Serviço" }],
+    doc.tipo, t => { buildStatus(t, ""); toggleChecklist(t); });
+  main().querySelector("#c_tipo").appendChild(tipoCombo);
+  buildStatus(doc.tipo, doc.status);
+  toggleChecklist(doc.tipo);
+  const prioCombo = selectCombo(B.prioridades, doc.prioridade || "Normal", null);
+  main().querySelector("#c_prio").appendChild(prioCombo);
+  const estadoCombo = selectCombo(["—"].concat(B.estado_geral), doc.estado_geral || "—", null);
+  main().querySelector("#c_estado").appendChild(estadoCombo);
+  const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null);
+  main().querySelector("#c_pag").appendChild(pagCombo);
 
-  // combobox cliente (com cadastro inline)
-  const cliCombo = comboSelect(clientes, doc.cliente_id || null, {
+  // cliente + veículo (veículo SEMPRE amarrado ao cliente: o seletor de veículo mostra só os do cliente)
+  let cliCombo, veiCombo;
+  const filtraVeiculos = cid => {
+    const lista = cid ? veiculos.filter(v => String(v.cliente_id) === String(cid)) : veiculos.slice();
+    veiCombo._setItems(lista);
+    const cur = veiCombo._value();
+    if (cur && cid && !lista.some(v => String(v.id) === String(cur))) veiCombo._setValue(null);
+  };
+  cliCombo = comboSelect(clientes, doc.cliente_id || null, {
     placeholder: "Buscar/selecionar cliente...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || c.telefone || "",
-    onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); cliCombo._setItems(clientes); cliCombo._setValue(c.id); } }),
+    onSelect: cid => filtraVeiculos(cid),
+    onCreate: txt => formCliente(null, { prefill: { nome: txt }, onSaved: c => { clientes.push(c); cliCombo._setItems(clientes); cliCombo._setValue(c.id); filtraVeiculos(c.id); } }),
   });
   main().querySelector("#c_cli").appendChild(cliCombo);
-  // combobox veículo (com cadastro inline)
-  const veiCombo = comboSelect(veiculos, doc.veiculo_id || null, {
+  veiCombo = comboSelect(doc.cliente_id ? veiculos.filter(v => String(v.cliente_id) === String(doc.cliente_id)) : veiculos.slice(), doc.veiculo_id || null, {
     placeholder: "Buscar/selecionar veículo...", getLabel: v => v.placa, getSub: v => `${v.marca || ""} ${v.modelo || ""}`.trim(),
-    onCreate: txt => formVeiculo(null, clientes, { prefill: { placa: txt.toUpperCase() }, onSaved: v => { veiculos.push(v); veiCombo._setItems(veiculos); veiCombo._setValue(v.id); } }),
+    onSelect: vid => { const v = veiculos.find(x => String(x.id) === String(vid)); if (v && v.cliente_id) cliCombo._setValue(v.cliente_id); },
+    onCreate: txt => formVeiculo(null, clientes, { prefill: { placa: txt.toUpperCase(), cliente_id: cliCombo._value() || null }, onSaved: v => { veiculos.push(v); if (v.cliente_id) cliCombo._setValue(v.cliente_id); filtraVeiculos(cliCombo._value()); veiCombo._setValue(v.id); } }),
   });
   main().querySelector("#c_vei").appendChild(veiCombo);
 
@@ -535,11 +572,11 @@ async function openDocForm(id) {
   main().querySelector("#cancel").onclick = () => setView("documentos");
   main().querySelector("#salvar").onclick = async () => {
     const payload = {
-      id: doc.id, tipo: val("#f_tipo"), status: val("#f_status"), prioridade: val("#f_prio"), data_abertura: val("#f_data"),
+      id: doc.id, tipo: tipoCombo._value(), status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: val("#f_data"),
       cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
       desconto_geral: num(val("#f_desc")), acrescimo: num(val("#f_acr")),
-      forma_pagamento: val("#f_pag"), prazo_execucao: val("#f_prazo"), validade: val("#f_val"),
-      observacoes: val("#f_obs"), estado_geral: val("#f_estado"), nivel_combustivel: nivelSel, obs_entrada: val("#f_obsent"),
+      forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: val("#f_prazo"), validade: val("#f_val"),
+      observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel, obs_entrada: val("#f_obsent"),
       item_chave_principal: main().querySelector("#c_chave").checked ? 1 : 0,
       item_chave_reserva: main().querySelector("#c_reserva").checked ? 1 : 0,
       item_documento: main().querySelector("#c_doc").checked ? 1 : 0,
@@ -564,7 +601,7 @@ async function printPreview(id) {
   const r = await api("print_documento", id);
   const m = h(`<div class="modal" style="width:880px"><button class="close">×</button><h3>${esc(r.numero)}</h3>
     <iframe style="width:100%;height:64vh;border:1px solid #e5e7eb;border-radius:8px"></iframe>
-    <div class="between mt"><button class="btn" id="fechar">Fechar</button><button class="btn btn-primary" id="imp">${ic("printer", 16)}<span>Imprimir</span></button></div></div>`);
+    <div class="between mt"><button class="btn" id="fechar">Fechar</button><button class="btn btn-primary" id="imp">${ic("printer", 16)}<span>Imprimir / Salvar PDF</span></button></div></div>`);
   const bg = openModal(m); m.querySelector("iframe").srcdoc = r.html;
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#fechar").onclick = () => bg.remove();
   m.querySelector("#imp").onclick = () => { const fr = m.querySelector("iframe"); fr.contentWindow.focus(); fr.contentWindow.print(); };
@@ -759,7 +796,7 @@ async function viewProdutos() {
     if (mode === "list") {
       const list = h(`<div class="list-rows"></div>`);
       its.forEach(i => {
-        const r = h(`<div class="list-row"><div class="avatar green">${ic("box", 22)}</div><div class="grow">
+        const r = h(`<div class="list-row"><div class="avatar ${i.tipo === "produto" ? "green" : "amber"}">${ic(i.tipo === "produto" ? "box" : "wrench", 22)}</div><div class="grow">
           <div style="font-weight:700">${esc(i.nome)} ${badge(i)}</div><div class="small muted">${esc(i.descricao || "")}</div></div>
           <span class="money">${money(i.preco)}</span><div class="acts"></div></div>`);
         r.querySelector(".acts").appendChild(btn("", "edit", () => formItem(i)));
@@ -770,7 +807,7 @@ async function viewProdutos() {
     } else {
       const grid = h(`<div class="cards grid3"></div>`);
       its.forEach(i => {
-        const card = h(`<div class="card"><div class="entity-head"><div class="avatar green">${ic("box", 22)}</div>
+        const card = h(`<div class="card"><div class="entity-head"><div class="avatar ${i.tipo === "produto" ? "green" : "amber"}">${ic(i.tipo === "produto" ? "box" : "wrench", 22)}</div>
             <div style="min-width:0"><div style="font-weight:700;font-size:15px">${esc(i.nome)} ${badge(i)}</div><div class="small muted">${esc(i.descricao || "")}</div></div></div>
           <div class="money" style="margin-top:10px;font-size:20px">${money(i.preco)}</div>
           <div class="small muted">${i.ativo ? "Ativo" : "Inativo"}</div>
@@ -793,15 +830,19 @@ function formItem(i) {
   const m = h(`<div class="modal" style="width:560px"><button class="close">×</button><h3>${i.id ? "Editar" : "Novo"} Item</h3>
     <div class="field"><label>Nome *</label><input id="nome" value="${esc(i.nome || "")}"></div>
     <div class="field"><label>Descrição</label><textarea id="desc">${esc(i.descricao || "")}</textarea></div>
-    <div class="grid2"><div class="field"><label>Tipo *</label><select id="tipo"><option value="produto" ${i.tipo === "produto" ? "selected" : ""}>Produto</option><option value="servico" ${i.tipo === "servico" ? "selected" : ""}>Serviço</option></select></div>
+    <div class="grid2"><div class="field"><label>Tipo *</label><div id="c_tipo"></div></div>
       <div class="field"><label>Preço *</label><input id="preco" class="money-in" style="text-align:right" value="${fmtMoney(i.preco || 0)}"></div></div>
-    <div class="field"><label>Ativo</label><select id="ativo"><option value="1" ${i.ativo ? "selected" : ""}>Sim</option><option value="0" ${!i.ativo ? "selected" : ""}>Não</option></select></div>
+    <div class="field"><label>Ativo</label><div id="c_ativo"></div></div>
     <div class="muted small">O preço é apenas sugestão — pode ser alterado no momento do lançamento.</div>
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m); bindMoney(m.querySelector("#preco"));
+  const tipoCombo = selectCombo([{ value: "produto", label: "Produto" }, { value: "servico", label: "Serviço" }], i.tipo || "servico", null);
+  m.querySelector("#c_tipo").appendChild(tipoCombo);
+  const ativoCombo = selectCombo([{ value: "1", label: "Sim" }, { value: "0", label: "Não" }], i.ativo ? "1" : "0", null);
+  m.querySelector("#c_ativo").appendChild(ativoCombo);
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
   m.querySelector("#sv").onclick = async () => {
-    const payload = { id: i.id, nome: val("#nome", m), descricao: val("#desc", m), tipo: val("#tipo", m), preco: num(val("#preco", m)), ativo: parseInt(val("#ativo", m)) };
+    const payload = { id: i.id, nome: val("#nome", m), descricao: val("#desc", m), tipo: tipoCombo._value(), preco: num(val("#preco", m)), ativo: parseInt(ativoCombo._value()) };
     if (!payload.nome) { toast("Nome é obrigatório", "err"); return; }
     await api("save_item", payload); toast("Item salvo", "ok"); bg.remove(); if (window.__reloadItens) window.__reloadItens();
   };

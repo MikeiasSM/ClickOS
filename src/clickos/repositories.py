@@ -220,7 +220,8 @@ class _Documentos:
 
     def get(self, con, did):
         d = _row(con.execute(
-            "SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa "
+            "SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa, "
+            "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo "
             "FROM documentos d LEFT JOIN clientes c ON c.id=d.cliente_id "
             "LEFT JOIN veiculos v ON v.id=d.veiculo_id WHERE d.id=?", (did,)).fetchone())
         if d is None:
@@ -232,7 +233,8 @@ class _Documentos:
         return d
 
     def list(self, con, tipo=None, status=None, q=None):
-        sql = ("SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa "
+        sql = ("SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa, "
+               "v.marca AS veiculo_marca, v.modelo AS veiculo_modelo "
                "FROM documentos d LEFT JOIN clientes c ON c.id=d.cliente_id "
                "LEFT JOIN veiculos v ON v.id=d.veiculo_id WHERE 1=1")
         args = []
