@@ -230,7 +230,9 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 /* ============================ dashboard ============================ */
 .dash-head{align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px}
 .kpi .k-sub{color:var(--muted);font-size:11px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dash-grid{display:grid;grid-template-columns:1.8fr 1fr;gap:14px;align-items:start}
+.dash-grid{display:grid;grid-template-columns:1.8fr 1fr;gap:14px;align-items:stretch}
+.dash-grid>.card{display:flex;flex-direction:column}
+.dash-grid #chart{flex:1;min-height:0;margin-top:12px}
 @media(max-width:1100px){.dash-grid{grid-template-columns:1fr}}
 .pipe-row{margin-bottom:15px}
 .pipe-row:last-child{margin-bottom:0}
@@ -271,8 +273,17 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .cl-item.okk{border-color:#bbf7d0;background:#f0fdf4}
 .cl-item.avaria{border-color:#fecaca;background:#fef2f2}
 
-/* gráfico de barras (faturamento) — altura fixa, preenche a largura */
-.barchart{position:relative;display:flex;align-items:stretch;gap:6px;height:260px;margin-top:12px}
+/* acordeão (seções recolhíveis da O.S.) */
+.acc .acc-head{display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.acc .acc-head .icon{transition:transform .2s;color:var(--muted);flex:none}
+.acc.collapsed .acc-head .icon{transform:rotate(-90deg)}
+.acc.collapsed .acc-body{display:none}
+/* O.S. faturada: somente leitura (cabeçalho do acordeão segue clicável p/ visualizar) */
+.os-locked{pointer-events:none;opacity:.92}
+.os-locked .acc-head{pointer-events:auto;opacity:1}
+
+/* gráfico de barras (faturamento) — preenche a altura do card (igualando o donut) */
+.barchart{position:relative;display:flex;align-items:stretch;gap:6px;height:100%;min-height:230px}
 .bc-col{flex:1;min-width:0;display:flex;flex-direction:column}
 .bc-plot{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
 .bc-val{font-size:10px;color:#475569;white-space:nowrap}

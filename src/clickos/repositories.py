@@ -184,7 +184,7 @@ class _Documentos:
         vals = [numero] + [data.get(f) for f in self.HEAD] + [tot["subtotal"], tot["total"], now, now]
         cur = con.execute(f"INSERT INTO documentos({','.join(cols)}) VALUES({','.join('?'*len(cols))})", vals)
         did = cur.lastrowid
-        if data.get("status") == "Entregue":  # O.S. lançada já faturada: data de faturamento = abertura (editável)
+        if data.get("status") == "Faturada":  # O.S. lançada já faturada: data de faturamento = abertura (editável)
             fat = (data.get("faturado_em") or "").strip() or data.get("data_abertura") or now
             con.execute("UPDATE documentos SET faturado_em=? WHERE id=?", (fat, did))
         self._save_children(con, did, itens, data.get("lataria"))
@@ -194,7 +194,7 @@ class _Documentos:
     def update(self, con, did, data, stamp=None):
         now = _now(stamp)
         itens = data.get("itens") or []
-        if data.get("status") == "Entregue" and not itens:
+        if data.get("status") == "Faturada" and not itens:
             raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
         tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"))
         # só grava as colunas presentes no payload (preserva as demais — evita zerar campos não enviados)
@@ -202,14 +202,14 @@ class _Documentos:
         sets = ",".join(f"{f}=?" for f in campos) + ",subtotal=?,total=?,atualizado_em=?"
         vals = [data.get(f) for f in campos] + [tot["subtotal"], tot["total"], now, did]
         con.execute(f"UPDATE documentos SET {sets} WHERE id=?", vals)
-        if data.get("status") == "Entregue":
+        if data.get("status") == "Faturada":
             fat = (data.get("faturado_em") or "").strip()
             if fat:  # data de faturamento editável (inclusive O.S. lançada já faturada)
                 con.execute("UPDATE documentos SET faturado_em=? WHERE id=?", (fat, did))
             else:    # senão, carimba agora se ainda não houver
                 con.execute("UPDATE documentos SET faturado_em=? WHERE id=? AND (faturado_em IS NULL OR faturado_em='')",
                             (now, did))
-        elif "status" in data:  # saiu de Entregue: a marca de faturamento deixa de valer
+        elif "status" in data:  # saiu de Faturada: a marca de faturamento deixa de valer
             con.execute("UPDATE documentos SET faturado_em=NULL WHERE id=?", (did,))
         self._save_children(con, did, itens, data.get("lataria"))
         con.commit()
@@ -233,14 +233,14 @@ class _Documentos:
 
     def set_status(self, con, did, status, stamp=None):
         now = _now(stamp)
-        if status == "Entregue":  # faturar exige ao menos um serviço (vale também p/ o arrastar do kanban)
+        if status == "Faturada":  # faturar exige ao menos um serviço (vale também p/ o arrastar do kanban)
             if not con.execute("SELECT COUNT(*) FROM documento_itens WHERE documento_id=?", (did,)).fetchone()[0]:
                 raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
         con.execute("UPDATE documentos SET status=?, atualizado_em=? WHERE id=?", (status, now, did))
-        if status == "Entregue":  # carimba a data de faturamento se ainda não houver
+        if status == "Faturada":  # carimba a data de faturamento se ainda não houver
             con.execute("UPDATE documentos SET faturado_em=? WHERE id=? AND (faturado_em IS NULL OR faturado_em='')",
                         (now, did))
-        else:  # saiu de Entregue (reabertura/cancelamento): limpa a marca de faturamento
+        else:  # saiu de Faturada (reabertura/cancelamento): limpa a marca de faturamento
             con.execute("UPDATE documentos SET faturado_em=NULL WHERE id=?", (did,))
         con.commit()
 

@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
 <meta charset="utf-8">
-<title>Recebimento {{ doc.numero }}</title>
+<title>Entrada {{ doc.numero }}</title>
 <style>
   @page { size: A4 portrait; margin: 10mm; }
   * { box-sizing: border-box; }
@@ -51,12 +51,12 @@
         <table>
           <tr><td class="lbl">Nº</td><td><b>{{ doc.numero }}</b></td></tr>
           <tr><td class="lbl">DATA</td><td>{{ doc.data_abertura|dt }}</td></tr>
-          {% if doc.usuario_nome %}<tr><td class="lbl">RECEB.</td><td>{{ doc.usuario_nome }}</td></tr>{% endif %}
+          {% if doc.usuario_nome %}<tr><td class="lbl">ENTRADA</td><td>{{ doc.usuario_nome }}</td></tr>{% endif %}
         </table>
       </td>
     </tr>
   </table>
-  <div class="tipo">COMPROVANTE DE RECEBIMENTO DE VEÍCULO</div>
+  <div class="tipo">COMPROVANTE DE ENTRADA DE VEÍCULO</div>
 
   <div class="sec mt">DADOS DA PESSOA</div>
   <table class="fields">
@@ -118,7 +118,7 @@
     <tr>
       <td style="width:48%"><div class="line">Assinatura da Pessoa — Nome / Data</div></td>
       <td style="width:4%"></td>
-      <td style="width:48%"><div class="line">Responsável pelo Recebimento</div></td>
+      <td style="width:48%"><div class="line">Responsável pela Entrada</div></td>
     </tr>
   </table>
 

@@ -32,6 +32,7 @@ const ICONS = {
   trending: '<polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>',
   dollar: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
   back: '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+  chevron: '<polyline points="6 9 12 15 18 9"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
   phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
   mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/>',
@@ -59,7 +60,7 @@ function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "
 function num(v) { if (typeof v === "number") return v; let s = String(v == null ? "" : v).replace(/[R$\s]/g, ""); if (s.indexOf(",") > -1) s = s.replace(/\./g, "").replace(",", "."); const n = parseFloat(s); return isNaN(n) ? 0 : n; }
 function money(v) { return "R$ " + Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtMoney(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fmtQtd(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }); }
+function fmtQtd(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function today() { return new Date().toISOString().slice(0, 10); }
 function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
@@ -341,7 +342,7 @@ function donut(segments, opts) {
 function statusClass(s) {
   if (["Aberta", "Aberto"].includes(s)) return "b-aberta";
   if (["Em Execução"].includes(s)) return "b-os";
-  if (["Concluída", "Entregue", "Aprovado"].includes(s)) return "b-green";
+  if (["Concluída", "Faturada", "Aprovado"].includes(s)) return "b-green";
   return "b-gray";
 }
 async function viewDashboard() {
@@ -449,7 +450,7 @@ function renderDocsList(board, docs, onReload) {
   });
   board.appendChild(list); injectIcons(board);
 }
-const OS_COLUNAS = [["Aberta", "Aberta"], ["Em Execução", "Em Execução"], ["Concluída", "Aguard. Faturamento"], ["Entregue", "Faturada"], ["Cancelada", "Cancelada"]];
+const OS_COLUNAS = [["Aberta", "Aberta"], ["Em Execução", "Em Execução"], ["Concluída", "Aguard. Faturamento"], ["Faturada", "Faturada"], ["Cancelada", "Cancelada"]];
 function renderKanban(board, docs) {
   const wrap = h(`<div class="kanban"></div>`);
   OS_COLUNAS.forEach(([status, title]) => {
@@ -671,7 +672,7 @@ async function formOrcamento(id, opts) {
   if (ef) ef.onclick = async () => { const saved = await api("save_documento", payloadDe()); efetivarOrcamento(saved); };
 }
 
-/* efetivar um orçamento -> cria a O.S. (Aberta) com os itens carregados para o recebimento.
+/* efetivar um orçamento -> cria a O.S. (Aberta) com os itens carregados para a entrada.
    O orçamento só é marcado 'Aprovado' quando a O.S. é efetivamente salva (ver openOS.salvar). */
 async function efetivarOrcamento(orc) {
   if (!await confirma(`Efetivar o orçamento ${esc(orc.numero)} e criar uma Ordem de Serviço?`, { ok: "Efetivar" })) return;
@@ -689,7 +690,7 @@ async function openOS(id, opts) {
   setActive("documentos");
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
-    tipo: "os", status: opts.faturada ? "Entregue" : "Aberta", prioridade: "Normal", data_abertura: today(),
+    tipo: "os", status: opts.faturada ? "Faturada" : "Aberta", prioridade: "Normal", data_abertura: today(),
     cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, acrescimo: 0, itens: [], lataria: [],
     forma_pagamento: "", observacoes: "", estado_geral: "", nivel_combustivel: "", obs_entrada: "", ocorrencia: "",
     parecer_mecanico: "", mecanico: "", faturado_em: "", origem_orcamento_id: null,
@@ -701,13 +702,15 @@ async function openOS(id, opts) {
   const latMap = {}; (doc.lataria || []).forEach(p => latMap[p.peca] = p.estado);
   let nivelSel = doc.nivel_combustivel || "";
   const isAberta = st === "Aberta", isExec = st === "Em Execução", isConcl = st === "Concluída",
-        isFat = st === "Entregue", isCancel = st === "Cancelada";
+        isFat = st === "Faturada", isCancel = st === "Cancelada";
   const verItens = !isAberta;                 // serviços a partir de Em Execução
   const verParecer = isConcl || isFat;
   const verFatur = isConcl || isFat;
+  const colapsado = !isAberta;                // checklist/observações iniciam minimizados após a abertura
+  const travada = isFat && !!id;              // O.S. faturada existente: somente leitura
   const respNome = doc.usuario_nome || (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "—";
   const titulo = id ? "Ordem de Serviço" : (opts.faturada ? "Nova O.S. (faturada)" : "Nova Ordem de Serviço");
-  const passos = [["Aberta", "Recebimento"], ["Em Execução", "Execução"], ["Concluída", "Aguard. Faturamento"], ["Entregue", "Faturada"]];
+  const passos = [["Aberta", "Entrada"], ["Em Execução", "Execução"], ["Concluída", "Aguard. Faturamento"], ["Faturada", "Faturada"]];
   const idxAtual = passos.findIndex(p => p[0] === st);
 
   render(`
@@ -718,17 +721,17 @@ async function openOS(id, opts) {
 
     <div class="wiz-steps mt" id="osstep">${passos.map((p, i) => `<span class="wiz-pill ${i === idxAtual ? "on" : i < idxAtual ? "done" : ""}">${i + 1}. ${esc(p[1])}</span>`).join("")} ${isCancel ? '<span class="wiz-pill" style="background:#fee2e2;color:#991b1b">Cancelada</span>' : ""}</div>
 
-    <div class="card mt"><div class="between"><h3 class="sec-title" style="margin:0">Dados do Recebimento</h3>
+    <div class="card mt"><div class="between"><h3 class="sec-title" style="margin:0">Dados da Entrada</h3>
       ${(!id && !opts.faturada) || (id && verItens && !isFat) ? `<button class="btn btn-sm" id="importar">${ic("repeat", 15)}<span>Importar orçamento</span></button>` : ""}</div>
       <div class="grid3 mt"><div class="field"><label>Data de Abertura</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
         <div class="field"><label>Prioridade</label><div id="c_prio"></div></div>
-        <div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div></div>
+        <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
-      <div class="grid2"><div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div></div>
+      <div class="grid2"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div></div></div>
 
-    <div class="card mt"><h3 class="sec-title">Checklist de Entrada</h3>
-      <div class="muted small" style="margin-bottom:8px">Marque o estado de cada item da lataria.</div>
+    <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Checklist de Entrada</h3>${ic("chevron", 18)}</div>
+      <div class="acc-body"><div class="muted small" style="margin:8px 0">Marque o estado de cada item da lataria.</div>
       <div class="checklist-grid" id="lataria"></div>
       <div class="grid2 mt"><div class="field"><label>Estado Geral</label><div id="c_estado"></div></div>
         <div class="field"><label>Nível de Combustível</label><div class="chips" id="nivel"></div></div></div>
@@ -736,11 +739,11 @@ async function openOS(id, opts) {
         <label><input type="checkbox" id="c_chave" ${doc.item_chave_principal ? "checked" : ""}> Chave Principal</label>
         <label><input type="checkbox" id="c_reserva" ${doc.item_chave_reserva ? "checked" : ""}> Chave Reserva</label>
         <label><input type="checkbox" id="c_doc" ${doc.item_documento ? "checked" : ""}> Documento</label>
-        <label><input type="checkbox" id="c_manual" ${doc.item_manual ? "checked" : ""}> Manual</label></div></div></div>
+        <label><input type="checkbox" id="c_manual" ${doc.item_manual ? "checked" : ""}> Manual</label></div></div></div></div>
 
-    <div class="card mt"><h3 class="sec-title">Ocorrência e Observações</h3>
-      <div class="field"><label>Ocorrência (relato do cliente)</label><textarea id="f_ocor" placeholder="Ex: barulho na suspensão ao passar em lombadas...">${esc(doc.ocorrencia || "")}</textarea></div>
-      <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div></div>
+    <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Ocorrência e Observações</h3>${ic("chevron", 18)}</div>
+      <div class="acc-body"><div class="field" style="margin-top:8px"><label>Ocorrência (relato do cliente)</label><textarea id="f_ocor" placeholder="Ex: barulho na suspensão ao passar em lombadas...">${esc(doc.ocorrencia || "")}</textarea></div>
+      <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div></div></div>
 
     <div class="card mt" id="card-itens" style="${verItens ? "" : "display:none"}"><h3 class="sec-title">Serviços e Produtos</h3><div id="itens-box"></div>
       <hr class="sep">
@@ -805,7 +808,7 @@ async function openOS(id, opts) {
     observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel,
     obs_entrada: val("#f_obsent"), ocorrencia: val("#f_ocor"), mecanico: val("#f_mec"), parecer_mecanico: val("#f_parecer"),
     origem_orcamento_id: doc.origem_orcamento_id || null,
-    faturado_em: status === "Entregue" ? (val("#f_fatdata") || doc.data_abertura) : "",
+    faturado_em: status === "Faturada" ? (val("#f_fatdata") || doc.data_abertura) : "",
     item_chave_principal: main().querySelector("#c_chave").checked ? 1 : 0,
     item_chave_reserva: main().querySelector("#c_reserva").checked ? 1 : 0,
     item_documento: main().querySelector("#c_doc").checked ? 1 : 0,
@@ -826,7 +829,7 @@ async function openOS(id, opts) {
   const acoes = main().querySelector("#acoes");
   const addBtn = (label, icon, fn, cls) => { const b = btn(label, icon, fn, cls || ""); acoes.appendChild(b); return b; };
   if (isAberta) {
-    addBtn("Comprovante de Recebimento", "printer", async () => { const s = await salvar(st); if (s) imprimirRecebimento(s.id); });
+    addBtn("Comprovante de Entrada", "printer", async () => { const s = await salvar(st); if (s) imprimirRecebimento(s.id); });
     addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); });
     addBtn("Iniciar Execução", "trending", async () => { const s = await salvar("Em Execução", "Em execução"); if (s) openOS(s.id); }, "btn-primary");
   } else if (isExec) {
@@ -838,11 +841,19 @@ async function openOS(id, opts) {
     addBtn("Faturar e Imprimir O.S.", "dollar", async () => {
       if (!itens.length) { toast("Adicione ao menos um serviço antes de faturar.", "err"); return; }
       if (!await confirma("Confirmar o faturamento desta O.S.?", { ok: "Faturar" })) return;
-      const s = await salvar("Entregue", "O.S. faturada"); if (s) { printDocumento(s.id); openOS(s.id); }
+      const s = await salvar("Faturada", "O.S. faturada"); if (s) { printDocumento(s.id); openOS(s.id); }
     }, "btn-primary");
   } else if (isFat) {
-    addBtn("Imprimir O.S.", "printer", async () => { const s = await salvar(st); if (s) printDocumento(s.id); });
-    addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); }, "btn-primary");
+    if (travada) {  // O.S. faturada existente: somente leitura
+      addBtn("Imprimir O.S.", "printer", () => printDocumento(doc.id), "btn-primary");
+      addBtn("Reabrir O.S.", "repeat", async () => {
+        if (!await confirma("Reabrir esta O.S.? Ela volta para 'Em Execução' (o parecer do mecânico é mantido).", { ok: "Reabrir" })) return;
+        try { await api("set_status", { id: doc.id, status: "Em Execução" }); openOS(doc.id); } catch (e) {}
+      });
+    } else {  // nova O.S. lançada já faturada: editável
+      addBtn("Imprimir O.S.", "printer", async () => { const s = await salvar(st); if (s) printDocumento(s.id); });
+      addBtn("Salvar", "save", async () => { const s = await salvar(st); if (s) setView("documentos"); }, "btn-primary");
+    }
   } else if (isCancel) {
     addBtn("Reabrir O.S.", "repeat", async () => { if (!await confirma("Reabrir esta O.S. (volta para Aberta)?")) return; const s = await salvar("Aberta"); if (s) openOS(s.id); });
   } else {
@@ -860,6 +871,13 @@ async function openOS(id, opts) {
     doc.origem_orcamento_id = orc.id;
     toast("Orçamento " + orc.numero + " importado" + (verItens ? "" : " — os serviços aparecem ao iniciar a execução"), "ok");
   });
+  // acordeão: clicar no cabeçalho expande/recolhe (checklist e observações)
+  main().querySelectorAll(".acc[data-acc] .acc-head").forEach(hd => hd.onclick = () => hd.parentElement.classList.toggle("collapsed"));
+  // O.S. faturada existente: somente leitura (cabeçalhos do acordeão continuam clicáveis p/ visualizar)
+  if (travada) {
+    main().querySelectorAll(".card").forEach(c => c.classList.add("os-locked"));
+    main().querySelectorAll(".item-form").forEach(el => el.style.display = "none");
+  }
 }
 
 /* ----------------------------------------------------------------- print */

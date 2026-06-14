@@ -125,10 +125,10 @@ class Api:
         orc_abertos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status='Aberto'")
         clientes = one("SELECT COUNT(*) FROM clientes")
         veiculos = one("SELECT COUNT(*) FROM veiculos")
-        # Faturamento = somente O.S. FATURADAS (status 'Entregue'), pela DATA DE FATURAMENTO
+        # Faturamento = somente O.S. FATURADAS (status 'Faturada'), pela DATA DE FATURAMENTO
         # (faturado_em; cai para a data de abertura quando vazio). Eixo temporal = faturado_em.
         DATA_FAT = "substr(COALESCE(NULLIF(faturado_em,''), data_abertura),1,7)"
-        FATURADAS = "tipo='os' AND status='Entregue'"
+        FATURADAS = "tipo='os' AND status='Faturada'"
         fat_mes = one(f"SELECT COALESCE(SUM(total),0) FROM documentos WHERE {FATURADAS} AND {DATA_FAT}=?", (mes,))
         fat_total = one(f"SELECT COALESCE(SUM(total),0) FROM documentos WHERE {FATURADAS}")
         ticket = one(f"SELECT COALESCE(AVG(total),0) FROM documentos WHERE {FATURADAS} AND total>0")

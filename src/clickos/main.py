@@ -36,6 +36,7 @@ def run():
         width=1280,
         height=820,
         min_size=(1024, 680),
+        maximized=True,  # abre maximizado por padrão
     )
     # NÃO atribuir a janela em api.* — o pywebview quebra ao expor a API se
     # recursar na janela. Os diálogos usam webview.windows[0] sob demanda.

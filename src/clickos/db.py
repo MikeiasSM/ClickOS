@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -18,7 +18,7 @@ NIVEIS_COMBUSTIVEL = ["Reserva", "1/4", "1/2", "3/4", "Cheio"]
 
 # Status simplificados e diferentes por tipo
 STATUS_ORCAMENTO = ["Aberto", "Aprovado", "Recusado", "Cancelado"]
-STATUS_OS = ["Aberta", "Em Execução", "Concluída", "Entregue", "Cancelada"]
+STATUS_OS = ["Aberta", "Em Execução", "Concluída", "Faturada", "Cancelada"]
 # Status da OS exibidos no donut "Pipeline de OS" (apenas o fluxo ativo)
 KANBAN_OS_STATUS = ["Aberta", "Em Execução", "Concluída"]
 # Colunas do quadro kanban (além de "Orçamentos"): inclui "Cancelada"
@@ -183,6 +183,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         for col in ("ocorrencia", "parecer_mecanico", "mecanico", "faturado_em"):
             _add_column(con, "documentos", col, "TEXT")
         con.execute("UPDATE meta SET schema_version = 6")
+    if ver < 7:
+        con.execute("UPDATE documentos SET status='Faturada' WHERE tipo='os' AND status='Entregue'")
+        con.execute("UPDATE meta SET schema_version = 7")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)
