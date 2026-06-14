@@ -248,17 +248,22 @@ function barChart(data) {
 function donut(segments, opts) {
   opts = opts || {};
   const total = segments.reduce((a, s) => a + s.value, 0);
-  const size = opts.size || 160, sw = opts.stroke || 22, r = (size - sw) / 2, c = size / 2, C = 2 * Math.PI * r;
+  const size = opts.size || 200, sw = opts.stroke || 30, r = (size - sw) / 2, c = size / 2, C = 2 * Math.PI * r;
+  const nz = segments.filter(s => s.value > 0).length;
+  const gap = nz > 1 ? Math.min(C * 0.05, sw * 0.9) : 0;  // folga entre fatias (pontas arredondadas)
   let off = 0, arcs = "";
   segments.forEach(s => {
     const len = total ? (s.value / total) * C : 0;
-    if (len > 0) arcs += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"></circle>`;
+    if (len > 0) {
+      const drawn = Math.max(0.1, len - gap);
+      arcs += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${drawn.toFixed(2)} ${(C - drawn).toFixed(2)}" stroke-dashoffset="${(-(off + gap / 2)).toFixed(2)}"></circle>`;
+    }
     off += len;
   });
   return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
     <g transform="rotate(-90 ${c} ${c})"><circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#f1f5f9" stroke-width="${sw}"></circle>${arcs}</g>
-    <text x="${c}" y="${c - 1}" text-anchor="middle" font-size="26" font-weight="800" fill="#111827">${total}</text>
-    <text x="${c}" y="${c + 17}" text-anchor="middle" font-size="11" fill="#64748b">OS</text></svg>`;
+    <text x="${c}" y="${c - 2}" text-anchor="middle" font-size="34" font-weight="800" fill="#111827">${total}</text>
+    <text x="${c}" y="${c + 20}" text-anchor="middle" font-size="13" fill="#64748b">OS</text></svg>`;
 }
 function statusClass(s) {
   if (["Aberta", "Aberto"].includes(s)) return "b-aberta";
@@ -288,7 +293,7 @@ async function viewDashboard() {
   main().querySelector("#chart").appendChild(barChart(d.fat_meses || []));
   const cores = { "Aberta": "#f59e0b", "Em Execução": "#2563eb", "Concluída": "#16a34a" };
   const segs = Object.entries(d.pipeline || {}).map(([k, v]) => ({ label: k, value: v, color: cores[k] || "#94a3b8" }));
-  main().querySelector("#donut").innerHTML = donut(segs, { size: 150, stroke: 24 });
+  main().querySelector("#donut").innerHTML = donut(segs, { size: 200, stroke: 30 });
   const legend = main().querySelector("#legend");
   segs.forEach(s => legend.appendChild(h(`<div class="leg-row"><span class="leg-dot" style="background:${s.color}"></span><span class="leg-label">${esc(s.label)}</span><b>${s.value}</b></div>`)));
   const rec = main().querySelector("#recent");
