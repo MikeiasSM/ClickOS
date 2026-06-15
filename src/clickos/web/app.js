@@ -127,6 +127,8 @@ function dtPicker(value, opts) {
   return wrap;
 }
 function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
+/* normaliza p/ busca: remove acentos, minúsculas e colapsa espaços (busca tolerante) */
+function normTxt(s) { return String(s == null ? "" : s).normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ").trim(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
 function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function monthRange() { const d = new Date(); return { ini: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), fim: ymd(new Date(d.getFullYear(), d.getMonth() + 1, 0)) }; }
@@ -304,8 +306,8 @@ function comboSelect(items, value, opt) {
   const setText = () => { const it = items.find(x => x.id == sel); input.value = it ? getLabel(it) : ""; };
   function renderOpts(filter) {
     ai = -1;
-    const f = (filter || "").toLowerCase();
-    const matches = items.filter(x => getLabel(x).toLowerCase().includes(f)).slice(0, 80);
+    const f = normTxt(filter);
+    const matches = items.filter(x => normTxt(getLabel(x)).includes(f)).slice(0, 80);
     let html = matches.map(x => `<div class="combo-opt" data-id="${x.id}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}</div>`).join("");
     if (!matches.length) html = '<div class="combo-none">Nenhum encontrado</div>';
     if (opt.onCreate && (filter || "").trim()) html += `<div class="combo-add">${ic("plus", 15)}<span>Cadastrar "${esc(filter.trim())}"</span></div>`;
@@ -341,8 +343,8 @@ function comboText(items, value, opt) {
   };
   function renderOpts() {
     ai = -1;
-    const f = input.value.trim().toLowerCase();
-    const matches = items.filter(x => getLabel(x).toLowerCase().includes(f)).slice(0, 60);
+    const f = normTxt(input.value);
+    const matches = items.filter(x => normTxt(getLabel(x)).includes(f)).slice(0, 60);
     let html = matches.map((x, i) => `<div class="combo-opt${podeDeletar(x) ? " has-del" : ""}" data-i="${i}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}${podeDeletar(x) ? `<button class="combo-del" data-i="${i}" title="Remover das sugestões">${ic("trash", 13)}</button>` : ""}</div>`).join("");
     if (!matches.length && !opt.onCreate) html = '<div class="combo-none">Sem sugestões — usado como texto</div>';
     if (opt.onCreate && input.value.trim() && !exact()) html += `<div class="combo-add">${ic("plus", 15)}<span>${esc(opt.createLabel ? opt.createLabel(input.value.trim()) : 'Cadastrar "' + input.value.trim() + '"')}</span></div>`;
@@ -864,6 +866,7 @@ async function openOS(id, opts) {
   }, opts.prefill || {});
   const st = doc.status;
   const ocExige = String((B.preferencias || {}).os_exige_oc) === "1";  // exige Nº O.C. no faturamento
+  const kmExige = String((B.preferencias || {}).os_exige_km) === "1";  // exige KM na abertura
   const itens = (doc.itens || []).map(i => ({ ...i }));
   const latMap = {}; (doc.lataria || []).forEach(p => latMap[p.peca] = p.estado);
   let nivelSel = doc.nivel_combustivel || "";
@@ -872,7 +875,7 @@ async function openOS(id, opts) {
   const verItens = !isAberta;                 // serviços a partir de Em Execução
   const verParecer = isConcl || isFat;
   const verFatur = isConcl || isFat;
-  const colapsado = !isAberta;                // checklist/observações iniciam minimizados após a abertura
+  const colapsado = true;                     // checklist/observações sempre iniciam minimizados (inclusive na abertura)
   const travada = isFat && !!id;              // O.S. faturada existente: somente leitura
   const respNome = doc.usuario_nome || (CURRENT_USER && (CURRENT_USER.nome || CURRENT_USER.login)) || "—";
   const titulo = id ? "Ordem de Serviço" : (opts.faturada ? "Nova O.S. (faturada)" : "Nova Ordem de Serviço");
@@ -894,7 +897,7 @@ async function openOS(id, opts) {
         <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
-      <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
+      <div class="grid3"><div class="field"><label>KM Entrada${kmExige ? " *" : ""}</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="${kmExige ? "Obrigatório" : "Ex: 45000"}"></div>
         <div class="field"><label>Previsão de Entrega</label><div id="c_prev"></div><span class="hint muted small">Opcional — sinaliza atraso</span></div>
         <div class="field"><label>Nº Ordem de Compra${ocExige ? " *" : ""}</label><input id="f_oc" value="${esc(doc.ordem_compra || "")}" placeholder="${ocExige ? "Exigida no faturamento" : "Opcional"}"></div></div></div>
 
@@ -910,7 +913,7 @@ async function openOS(id, opts) {
         <label><input type="checkbox" id="c_manual" ${doc.item_manual ? "checked" : ""}> Manual</label></div></div></div></div>
 
     <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Ocorrência e Observações</h3>${ic("chevron", 18)}</div>
-      <div class="acc-body"><div class="field" style="margin-top:8px"><label>Ocorrência (relato do cliente)</label><textarea id="f_ocor" placeholder="Ex: barulho na suspensão ao passar em lombadas...">${esc(doc.ocorrencia || "")}</textarea></div>
+      <div class="acc-body"><div class="field" style="margin-top:8px"><label>Ocorrência (relato do cliente)</label><textarea id="f_ocor">${esc(doc.ocorrencia || "")}</textarea></div>
       <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div></div></div>
 
     <div class="card mt" id="card-itens" style="${verItens ? "" : "display:none"}"><h3 class="sec-title">Serviços e Produtos</h3><div id="itens-box"></div>
@@ -998,6 +1001,9 @@ async function openOS(id, opts) {
   const validaPessoa = () => { if (!cliCombo._value()) { toast("Selecione a pessoa", "err"); return false; } return true; };
   const salvar = async (status, msg) => {
     if (!validaPessoa()) return null;
+    if (kmExige && !val("#f_km")) {
+      toast("Informe o KM de entrada do veículo (exigido nas preferências).", "err"); return null;
+    }
     if (status === "Faturada" && ocExige && !val("#f_oc")) {
       toast("Informe o Nº da Ordem de Compra para faturar (exigido nas preferências).", "err"); return null;
     }
@@ -1604,7 +1610,9 @@ async function renderPreferencias(container) {
         <select id="p_os_uni" class="pref-sel">${uOpts(prefs.os_atraso_unidade)}</select>
         <span class="muted small">além da previsão</span></div>
       <div class="pref-row" style="margin-top:14px"><label>Ordem de Compra</label>
-        <label class="pref-check"><input type="checkbox" id="p_oc" ${String(prefs.os_exige_oc) === "1" ? "checked" : ""}> Exigir Nº de Ordem de Compra ao faturar a O.S.</label></div></div>
+        <label class="pref-check"><input type="checkbox" id="p_oc" ${String(prefs.os_exige_oc) === "1" ? "checked" : ""}> Exigir Nº de Ordem de Compra ao faturar a O.S.</label></div>
+      <div class="pref-row"><label>KM do Veículo</label>
+        <label class="pref-check"><input type="checkbox" id="p_km" ${String(prefs.os_exige_km) === "1" ? "checked" : ""}> Exigir KM de entrada ao abrir a O.S.</label></div></div>
 
     <div class="between mt"><span></span><button class="btn btn-primary" id="p_save">${ic("save", 16)}<span>Salvar preferências</span></button></div>`;
   injectIcons(container);
@@ -1617,6 +1625,7 @@ async function renderPreferencias(container) {
       orc_validade_qtd: val("#p_orc_qtd") || "0", orc_validade_unidade: container.querySelector("#p_orc_uni").value,
       os_atraso_qtd: val("#p_os_qtd") || "0", os_atraso_unidade: container.querySelector("#p_os_uni").value,
       os_exige_oc: container.querySelector("#p_oc").checked ? "1" : "0",
+      os_exige_km: container.querySelector("#p_km").checked ? "1" : "0",
     };
     B.preferencias = await api("save_preferencias", payload);
     toast("Preferências salvas", "ok");

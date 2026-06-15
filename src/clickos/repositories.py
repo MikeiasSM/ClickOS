@@ -170,6 +170,7 @@ PREF_DEFAULTS = {
     "os_atraso_qtd": "1",
     "os_atraso_unidade": "dias",
     "os_exige_oc": "0",  # exigir Nº de Ordem de Compra ao faturar a O.S.
+    "os_exige_km": "0",  # exigir KM de entrada ao abrir a O.S.
 }
 
 
@@ -245,6 +246,9 @@ class _Documentos:
         itens = data.get("itens") or []
         if data["tipo"] == "orcamento" and not itens:
             raise ValueError("Adicione ao menos um produto/serviço ao orçamento.")
+        if data["tipo"] == "os" and str(get_preferencias(con).get("os_exige_km")) in ("1", "true", "True") \
+                and not str(data.get("km_entrada") or "").strip():
+            raise ValueError("Informe o KM de entrada do veículo (exigido nas preferências).")
         numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))
         tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
                                       data.get("desconto_tipo"), data.get("acrescimo_tipo"))
