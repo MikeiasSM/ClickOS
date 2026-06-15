@@ -182,12 +182,11 @@ class Api:
         agora = datetime.now()
         mes = agora.strftime("%Y-%m")
         total = one("SELECT COUNT(*) FROM documentos")
-        orcamentos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento'")
-        os_count = one("SELECT COUNT(*) FROM documentos WHERE tipo='os'")
-        # "OS em aberto" = O.S. ainda no fluxo (Aberta/Em Execução/Concluída), batendo com o donut do pipeline
-        _ph = ",".join("?" * len(dbmod.KANBAN_OS_STATUS))
-        abertas = one(f"SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status IN ({_ph})",
-                      tuple(dbmod.KANBAN_OS_STATUS))
+        # Cards do dashboard — em nenhum se contabilizam documentos cancelados
+        orcamentos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status<>'Cancelado'")
+        os_count = one("SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status<>'Cancelada'")
+        # "Em aberto" = O.S. ainda não concluídas: apenas Aberta + Em Execução
+        em_aberto = one("SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status IN ('Aberta','Em Execução')")
         orc_abertos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status='Aberto'")
         clientes = one("SELECT COUNT(*) FROM clientes")
         veiculos = one("SELECT COUNT(*) FROM veiculos")
@@ -214,7 +213,7 @@ class Api:
                 mo += 12
                 y -= 1
             meses.append({"label": mes_pt[mo - 1], "valor": round(raw.get(f"{y:04d}-{mo:02d}", 0) or 0, 2)})
-        return {"total": total, "orcamentos": orcamentos, "os_count": os_count, "abertas": abertas,
+        return {"total": total, "orcamentos": orcamentos, "os_count": os_count, "em_aberto": em_aberto,
                 "orcamentos_abertos": orc_abertos, "clientes": clientes, "veiculos": veiculos,
                 "faturamento_mes": fat_mes, "faturamento_total": fat_total, "ticket_medio": ticket,
                 "pipeline": pipe, "fat_meses": meses, "recentes": repo.documentos.list(con)[:6]}

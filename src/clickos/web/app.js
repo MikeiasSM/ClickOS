@@ -469,10 +469,10 @@ async function viewDashboard() {
       <div class="row"><button class="btn" id="nc">${ic("user", 16)}<span>Nova Pessoa</span></button><button class="btn" id="no">${ic("doc", 16)}<span>Novo Orçamento</span></button><button class="btn btn-primary" id="nd">${ic("plus", 16)}<span>Nova O.S.</span></button></div>
     </div>
     <div class="cards kpis">
+      ${kpi("Ordens de Serviço", d.os_count, "wrench", "#2563eb", "#dbeafe", d.em_aberto + " em aberto")}
+      ${kpi("O.S. em aberto", d.em_aberto, "trending", "#d97706", "#fef9c3", "Abertas + em execução")}
       ${kpi("Faturamento do mês", money(d.faturamento_mes), "dollar", "#16a34a", "#dcfce7", "Total em OS: " + money(d.faturamento_total))}
-      ${kpi("OS em aberto", d.abertas, "trending", "#d97706", "#fef9c3", d.os_count + " OS no total")}
-      ${kpi("Orçamentos abertos", d.orcamentos_abertos, "file", "#2563eb", "#dbeafe", d.orcamentos + " orçamentos")}
-      ${kpi("Pessoas", d.clientes, "users", "#7c3aed", "#f3e8ff", d.veiculos + " veículos")}
+      ${kpi("Orçamentos", d.orcamentos, "file", "#7c3aed", "#f3e8ff", d.orcamentos_abertos + " abertos")}
     </div>
     <div class="dash-grid mt">
       <div class="card"><div class="between"><h3 style="margin:0">Faturamento (últimos 6 meses)</h3><span class="muted small">Ticket médio: ${money(d.ticket_medio)}</span></div><div id="chart" style="margin-top:12px"></div></div>
