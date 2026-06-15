@@ -171,6 +171,8 @@ PREF_DEFAULTS = {
     "os_atraso_unidade": "dias",
     "os_exige_oc": "0",  # exigir Nº de Ordem de Compra ao faturar a O.S.
     "os_exige_km": "0",  # exigir KM de entrada ao abrir a O.S.
+    "os_print_checklist": "1",  # incluir o checklist de entrada na impressão da O.S.
+    "os_print_garantia": "0",   # exibir o termo de garantia (empresa) na impressão da O.S.
 }
 
 

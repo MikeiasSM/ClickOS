@@ -44,6 +44,8 @@
   .assin td { text-align: center; font-size: 8.5px; padding-top: 16px; }
   .line { border-top: 1px solid #000; padding-top: 2px; }
   .foot { text-align: center; font-size: 8px; color: #555; margin-top: 6px; }
+  .termo { font-size: 8px; text-align: justify; color: #222; line-height: 1.35; border: 1px solid #000;
+           border-top: 0; padding: 4px 6px; white-space: pre-line; }
   .mt { margin-top: 5px; }
   h-spacer { display:block; height:5px; }
 </style>
@@ -120,8 +122,8 @@
     </tr>
   </table>
 
-  {% if doc.tipo == 'os' %}
-  <!-- CHECKLIST DE ENTRADA (somente Ordem de Serviço) -->
+  {% if doc.tipo == 'os' and prefs.os_print_checklist == '1' %}
+  <!-- CHECKLIST DE ENTRADA (somente Ordem de Serviço; parâmetro os_print_checklist) -->
   <div class="sec mt">CHECKLIST DE ENTRADA DO VEÍCULO</div>
   <table class="lat">
     <tr>
@@ -217,6 +219,12 @@
   {% if doc.parecer_mecanico or doc.mecanico %}
   <div class="sec mt">PARECER TÉCNICO{% if doc.mecanico %} — {{ doc.mecanico }}{% endif %}</div>
   <table class="fields"><tr><td colspan="6" style="min-height:22px">{{ doc.parecer_mecanico or '' }}</td></tr></table>
+  {% endif %}
+
+  {% if doc.tipo == 'os' and prefs.os_print_garantia == '1' and empresa.termo_garantia %}
+  <!-- TERMO DE GARANTIA (parâmetro os_print_garantia; texto vem dos dados da empresa) -->
+  <div class="sec mt">TERMO DE GARANTIA</div>
+  <div class="termo">{{ empresa.termo_garantia }}</div>
   {% endif %}
 
   <!-- ASSINATURAS -->

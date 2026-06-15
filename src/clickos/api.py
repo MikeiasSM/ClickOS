@@ -283,7 +283,9 @@ class Api:
         cliente = repo.clientes.get(self.con, doc["cliente_id"]) if doc.get("cliente_id") else {}
         veiculo = repo.veiculos.get(self.con, doc["veiculo_id"]) if doc.get("veiculo_id") else {}
         empresa = dict(self.con.execute("SELECT * FROM empresa WHERE id=1").fetchone())
-        html = renderer(doc, empresa, cliente, veiculo, gerado_em=datetime.now().strftime("%d/%m/%Y às %H:%M"))
+        prefs = repo.get_preferencias(self.con)
+        html = renderer(doc, empresa, cliente, veiculo, prefs=prefs,
+                        gerado_em=datetime.now().strftime("%d/%m/%Y às %H:%M"))
         return doc, html
 
     @_api

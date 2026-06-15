@@ -1612,7 +1612,11 @@ async function renderPreferencias(container) {
       <div class="pref-row" style="margin-top:14px"><label>Ordem de Compra</label>
         <label class="pref-check"><input type="checkbox" id="p_oc" ${String(prefs.os_exige_oc) === "1" ? "checked" : ""}> Exigir Nº de Ordem de Compra ao faturar a O.S.</label></div>
       <div class="pref-row"><label>KM do Veículo</label>
-        <label class="pref-check"><input type="checkbox" id="p_km" ${String(prefs.os_exige_km) === "1" ? "checked" : ""}> Exigir KM de entrada ao abrir a O.S.</label></div></div>
+        <label class="pref-check"><input type="checkbox" id="p_km" ${String(prefs.os_exige_km) === "1" ? "checked" : ""}> Exigir KM de entrada ao abrir a O.S.</label></div>
+      <div class="pref-row" style="margin-top:14px"><label>Checklist na impressão</label>
+        <label class="pref-check"><input type="checkbox" id="p_pchk" ${String(prefs.os_print_checklist) === "1" ? "checked" : ""}> Incluir o checklist de entrada na impressão da O.S.</label></div>
+      <div class="pref-row"><label>Termo de garantia</label>
+        <label class="pref-check"><input type="checkbox" id="p_pgar" ${String(prefs.os_print_garantia) === "1" ? "checked" : ""}> Exibir o termo de garantia (Configurações → Empresa) na impressão da O.S.</label></div></div>
 
     <div class="between mt"><span></span><button class="btn btn-primary" id="p_save">${ic("save", 16)}<span>Salvar preferências</span></button></div>`;
   injectIcons(container);
@@ -1626,6 +1630,8 @@ async function renderPreferencias(container) {
       os_atraso_qtd: val("#p_os_qtd") || "0", os_atraso_unidade: container.querySelector("#p_os_uni").value,
       os_exige_oc: container.querySelector("#p_oc").checked ? "1" : "0",
       os_exige_km: container.querySelector("#p_km").checked ? "1" : "0",
+      os_print_checklist: container.querySelector("#p_pchk").checked ? "1" : "0",
+      os_print_garantia: container.querySelector("#p_pgar").checked ? "1" : "0",
     };
     B.preferencias = await api("save_preferencias", payload);
     toast("Preferências salvas", "ok");
