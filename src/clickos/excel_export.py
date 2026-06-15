@@ -18,6 +18,7 @@ _L = Alignment(horizontal="left", vertical="center", wrap_text=True)
 _C = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _R = Alignment(horizontal="right", vertical="center")
 COLS = "ABCDEFG"  # 7 colunas
+LARGURAS = [4, 22, 13, 13, 15, 14, 14]  # A=# (estreito); demais p/ rótulos/valores largos
 
 
 def _brl(v) -> str:
@@ -54,14 +55,14 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
     ws = wb.active
     ws.title = "Orcamento" if doc.get("tipo") == "orcamento" else "OrdemServico"
     ws.sheet_view.showGridLines = False
-    larguras = [4, 26, 16, 12, 12, 14, 14]
-    for i, w in enumerate(larguras):
+    for i, w in enumerate(LARGURAS):
         ws.column_dimensions[get_column_letter(i + 1)].width = w
 
-    row = [1]  # cursor mutável
+    row = [1]
 
     def merge(r, c1, c2):
-        ws.merge_cells(f"{c1}{r}:{c2}{r}")
+        if c1 != c2:
+            ws.merge_cells(f"{c1}{r}:{c2}{r}")
 
     def box(r1, r2):
         for r in range(r1, r2 + 1):
@@ -72,32 +73,31 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
         r = row[0]
         merge(r, "A", "G")
         cel = ws[f"A{r}"]
-        cel.value = texto
-        cel.font = Font(bold=True, size=10.5)
-        cel.fill = _GRAY
-        cel.alignment = _L
+        cel.value, cel.font, cel.fill, cel.alignment = texto, Font(bold=True, size=10.5), _GRAY, _L
         box(r, r)
         row[0] += 1
 
-    def campo(label, valor, lc="A", vc1="B", vc2="C", label2=None, valor2=None, l2c="D", v2c1="E", v2c2="G"):
+    def _lbl(cell, texto):
+        cell.value, cell.font, cell.fill, cell.alignment = texto, _BOLD, _LIGHT, _L
+
+    def campo(label, valor, label2=None, valor2=None, full=False):
+        """Linha rótulo/valor. Rótulo ocupa A:B (largo, sem quebrar). full=True → valor em C:G."""
         r = row[0]
-        ws[f"{lc}{r}"] = label
-        ws[f"{lc}{r}"].font = _BOLD
-        ws[f"{lc}{r}"].alignment = _L
-        merge(r, vc1, vc2)
-        ws[f"{vc1}{r}"] = valor or ""
-        ws[f"{vc1}{r}"].alignment = _L
-        if label2 is not None:
-            ws[f"{l2c}{r}"] = label2
-            ws[f"{l2c}{r}"].font = _BOLD
-            ws[f"{l2c}{r}"].alignment = _L
-            merge(r, v2c1, v2c2)
-            ws[f"{v2c1}{r}"] = valor2 or ""
-            ws[f"{v2c1}{r}"].alignment = _L
+        merge(r, "A", "B")
+        _lbl(ws[f"A{r}"], label)
+        if full:
+            merge(r, "C", "G")
+            ws[f"C{r}"].value, ws[f"C{r}"].alignment = (valor or ""), _L
+        else:
+            merge(r, "C", "D")
+            ws[f"C{r}"].value, ws[f"C{r}"].alignment = (valor or ""), _L
+            _lbl(ws[f"E{r}"], label2 or "")
+            merge(r, "F", "G")
+            ws[f"F{r}"].value, ws[f"F{r}"].alignment = (valor2 or ""), _L
         box(r, r)
         row[0] += 1
 
-    # ---- Cabeçalho: empresa + meta ----
+    # ---- Cabeçalho: empresa (A:E) + meta (F:G) ----
     nome_emp = empresa.get("razao_social") or empresa.get("nome_fantasia") or "Empresa"
     det = []
     if empresa.get("cnpj"):
@@ -116,11 +116,11 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
         linha3.append(f"WhatsApp: {empresa['whatsapp']}")
     r0 = row[0]
     merge(r0, "A", "E")
-    ws[f"A{r0}"] = nome_emp + "\n" + "  ".join(det) + "\n" + linha2 + "\n" + "  ".join(linha3)
+    partes = [nome_emp, "   ".join(det), linha2, "   ".join(linha3)]
+    ws[f"A{r0}"].value = "\n".join(p for p in partes if p)
     ws[f"A{r0}"].font = Font(bold=True, size=12)
     ws[f"A{r0}"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     merge(r0, "F", "G")
-    tipo_lbl = "ORÇAMENTO" if doc.get("tipo") == "orcamento" else "ORDEM DE SERVIÇO"
     meta = [f"Nº {doc.get('numero', '')}", f"Data: {_dt(doc.get('data_abertura'))}", f"Status: {doc.get('status', '')}"]
     if doc.get("usuario_nome"):
         meta.append(f"Atend.: {doc['usuario_nome']}")
@@ -128,74 +128,56 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
         meta.append(f"Fatur.: {_dt(doc['faturado_em'])}")
     if doc.get("ordem_compra"):
         meta.append(f"O.C.: {doc['ordem_compra']}")
-    ws[f"F{r0}"] = "\n".join(meta)
+    ws[f"F{r0}"].value = "\n".join(meta)
     ws[f"F{r0}"].font = Font(size=9)
     ws[f"F{r0}"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     ws.row_dimensions[r0].height = 64
     box(r0, r0)
     row[0] += 1
-    # título
     r = row[0]
     merge(r, "A", "G")
-    ws[f"A{r}"] = tipo_lbl
-    ws[f"A{r}"].font = Font(bold=True, size=13)
-    ws[f"A{r}"].alignment = _C
+    tipo_lbl = "ORÇAMENTO" if doc.get("tipo") == "orcamento" else "ORDEM DE SERVIÇO"
+    ws[f"A{r}"].value, ws[f"A{r}"].font, ws[f"A{r}"].alignment = tipo_lbl, Font(bold=True, size=13), _C
     box(r, r)
     row[0] += 1
 
     # ---- Dados da pessoa ----
     secao("DADOS DA PESSOA")
-    campo("Nome", cliente.get("nome") or doc.get("cliente_nome"), label2="CPF/CNPJ", valor2=cliente.get("cpf_cnpj"))
+    campo("Nome", cliente.get("nome") or doc.get("cliente_nome"), "CPF/CNPJ", cliente.get("cpf_cnpj"))
+    campo("Telefone", cliente.get("telefone"), "WhatsApp", cliente.get("whatsapp"))
     endereco = cliente.get("endereco") or ""
     if cliente.get("cidade"):
         endereco += f" - {cliente['cidade']}/{cliente.get('uf') or ''}"
-    campo("Telefone", cliente.get("telefone"), label2="WhatsApp", valor2=cliente.get("whatsapp"))
-    campo("Endereço", endereco, vc2="G", label2=None)
+    campo("Endereço", endereco, full=True)
 
     # ---- Dados do veículo ----
     secao("DADOS DO VEÍCULO")
     campo("Placa", veiculo.get("placa") or doc.get("veiculo_placa"),
-          label2="Marca/Modelo", valor2=f"{veiculo.get('marca') or ''} {veiculo.get('modelo') or ''}".strip())
-    campo("Cor", veiculo.get("cor"), label2="Combustível", valor2=veiculo.get("combustivel"))
-    campo("Quilometragem", doc.get("km_entrada"), label2="Renavam", valor2=veiculo.get("renavam"))
+          "Marca/Mod.", f"{veiculo.get('marca') or ''} {veiculo.get('modelo') or ''}".strip())
+    campo("Cor", veiculo.get("cor"), "Combustível", veiculo.get("combustivel"))
+    campo("KM", doc.get("km_entrada"), "Renavam", veiculo.get("renavam"))
 
     # ---- Itens ----
     secao("SERVIÇOS / PRODUTOS")
     rh = row[0]
-    cabec = ["#", "Descrição (serviço / produto)", "Qtd", "Vlr Bruto", "Desconto", "Vlr Líquido"]
-    merge(rh, "B", "C")  # descrição ocupa B:C
-    ws[f"A{rh}"] = "#"
-    ws[f"B{rh}"] = "Descrição (serviço / produto)"
-    ws[f"D{rh}"] = "Qtd"
-    ws[f"E{rh}"] = "Vlr Bruto"
-    ws[f"F{rh}"] = "Desconto"
-    ws[f"G{rh}"] = "Vlr Líquido"
-    for c in COLS:
-        ws[f"{c}{rh}"].font = _BOLD
-        ws[f"{c}{rh}"].fill = _LIGHT
-        ws[f"{c}{rh}"].alignment = _C
+    merge(rh, "B", "C")
+    for col, txt in (("A", "#"), ("B", "Descrição (serviço / produto)"), ("D", "Qtd"),
+                     ("E", "Vlr Bruto"), ("F", "Desconto"), ("G", "Vlr Líquido")):
+        ws[f"{col}{rh}"].value, ws[f"{col}{rh}"].font, ws[f"{col}{rh}"].fill, ws[f"{col}{rh}"].alignment = txt, _BOLD, _LIGHT, _C
     box(rh, rh)
     row[0] += 1
     itens = doc.get("itens") or []
     for i, it in enumerate(itens, 1):
         r = row[0]
         merge(r, "B", "C")
-        ws[f"A{r}"] = i
-        ws[f"A{r}"].alignment = _C
-        ws[f"B{r}"] = it.get("descricao") or ""
-        ws[f"B{r}"].alignment = _L
-        ws[f"D{r}"] = _qtd(it.get("quantidade"))
-        ws[f"D{r}"].alignment = _R
-        ws[f"E{r}"] = _brl(it.get("valor_unitario"))
-        ws[f"E{r}"].alignment = _R
-        ws[f"F{r}"] = _brl(it.get("desconto"))
-        ws[f"F{r}"].alignment = _R
-        ws[f"G{r}"] = _brl(it.get("valor_liquido"))
-        ws[f"G{r}"].alignment = _R
+        ws[f"A{r}"].value, ws[f"A{r}"].alignment = i, _C
+        ws[f"B{r}"].value, ws[f"B{r}"].alignment = (it.get("descricao") or ""), _L
+        for col, v in (("D", _qtd(it.get("quantidade"))), ("E", _brl(it.get("valor_unitario"))),
+                       ("F", _brl(it.get("desconto"))), ("G", _brl(it.get("valor_liquido")))):
+            ws[f"{col}{r}"].value, ws[f"{col}{r}"].alignment = v, _R
         box(r, r)
         row[0] += 1
-    # linhas vazias para preenchimento manual (mínimo de 4)
-    for _ in range(max(0, 4 - len(itens))):
+    for _ in range(max(0, 4 - len(itens))):  # linhas em branco p/ preenchimento manual
         r = row[0]
         merge(r, "B", "C")
         box(r, r)
@@ -208,41 +190,26 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
     acr = doc.get("acrescimo_valor")
     if acr is None:
         acr = doc.get("acrescimo")
-    for label, valor in (("Subtotal", doc.get("subtotal")), ("Desconto", desc), ("Acréscimo", acr)):
+    for label, valor, big in (("Subtotal", doc.get("subtotal"), False), ("Desconto", desc, False),
+                              ("Acréscimo", acr, False), ("TOTAL GERAL", doc.get("total"), True)):
         r = row[0]
         merge(r, "A", "E")
-        ws[f"F{r}"] = label
-        ws[f"F{r}"].font = _BOLD
-        ws[f"F{r}"].alignment = _R
-        ws[f"G{r}"] = _brl(valor)
-        ws[f"G{r}"].alignment = _R
+        f = Font(bold=True, size=12) if big else _BOLD
+        ws[f"F{r}"].value, ws[f"F{r}"].font, ws[f"F{r}"].alignment = label, f, _R
+        ws[f"G{r}"].value, ws[f"G{r}"].font, ws[f"G{r}"].alignment = _brl(valor), f, _R
         box(r, r)
         row[0] += 1
-    r = row[0]
-    merge(r, "A", "E")
-    ws[f"F{r}"] = "TOTAL GERAL"
-    ws[f"F{r}"].font = Font(bold=True, size=12)
-    ws[f"F{r}"].alignment = _R
-    ws[f"G{r}"] = _brl(doc.get("total"))
-    ws[f"G{r}"].font = Font(bold=True, size=12)
-    ws[f"G{r}"].alignment = _R
-    box(r, r)
-    row[0] += 1
 
     # ---- Condições ----
     secao("CONDIÇÕES COMERCIAIS")
-    campo("Forma de Pagamento", doc.get("forma_pagamento"), label2="Validade", valor2=doc.get("validade"))
+    campo("Forma de Pagamento", doc.get("forma_pagamento"), "Validade", doc.get("validade"))
     if doc.get("prazo_execucao"):
-        campo("Prazo de Execução", doc.get("prazo_execucao"), vc2="G", label2=None)
+        campo("Prazo de Execução", doc.get("prazo_execucao"), full=True)
     if doc.get("observacoes"):
-        secao("OBSERVAÇÕES")
-        r = row[0]
-        merge(r, "A", "G")
-        ws[f"A{r}"] = doc.get("observacoes")
-        ws[f"A{r}"].alignment = _L
-        ws.row_dimensions[r].height = 38
-        box(r, r)
-        row[0] += 1
+        campo("Observações", "", full=True)
+        r = row[0] - 1
+        ws[f"C{r}"].value = doc.get("observacoes")
+        ws.row_dimensions[r].height = 36
 
     # ---- Parecer técnico (O.S.) ----
     if doc.get("parecer_mecanico") or doc.get("mecanico"):
@@ -252,8 +219,7 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
         secao(titulo)
         r = row[0]
         merge(r, "A", "G")
-        ws[f"A{r}"] = doc.get("parecer_mecanico") or ""
-        ws[f"A{r}"].alignment = _L
+        ws[f"A{r}"].value, ws[f"A{r}"].alignment = (doc.get("parecer_mecanico") or ""), _L
         ws.row_dimensions[r].height = 38
         box(r, r)
         row[0] += 1
@@ -263,20 +229,16 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
     r = row[0]
     merge(r, "A", "C")
     merge(r, "E", "G")
-    ws[f"A{r}"] = "Assinatura da Pessoa — Nome / Data"
-    ws[f"A{r}"].alignment = _C
-    ws[f"A{r}"].border = Border(top=_THIN)
-    ws[f"E{r}"] = "Responsável pela Empresa — Nome / Data"
-    ws[f"E{r}"].alignment = _C
-    ws[f"E{r}"].border = Border(top=_THIN)
+    ws[f"A{r}"].value, ws[f"A{r}"].alignment, ws[f"A{r}"].border = "Assinatura da Pessoa — Nome / Data", _C, Border(top=_THIN)
+    ws[f"E{r}"].value, ws[f"E{r}"].alignment, ws[f"E{r}"].border = "Responsável pela Empresa — Nome / Data", _C, Border(top=_THIN)
     ws.row_dimensions[r].height = 34
 
-    # impressão em A4 retrato ajustada à largura
     ws.page_setup.orientation = "portrait"
     ws.page_setup.paperSize = 9
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_area = f"A1:G{row[0]}"
 
     buf = BytesIO()
     wb.save(buf)

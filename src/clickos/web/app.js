@@ -90,7 +90,7 @@ function dtPicker(value, opts) {
     if (viewY == null) viewY = base.y; if (viewM == null) viewM = base.m;
     const first = new Date(viewY, viewM, 1).getDay(), dias = new Date(viewY, viewM + 1, 0).getDate(), hoje = _nowParts();
     let grid = "";
-    for (let i = 0; i < first; i++) grid += `<span class="dtp-day empty"></span>`;
+    for (let i = 0; i < first; i++) grid += `<button type="button" class="dtp-day empty" disabled></button>`;
     for (let d = 1; d <= dias; d++) {
       const isSel = sel && sel.y === viewY && sel.m === viewM && sel.d === d;
       const isHoje = hoje.y === viewY && hoje.m === viewM && hoje.d === d;
