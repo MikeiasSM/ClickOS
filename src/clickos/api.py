@@ -115,6 +115,18 @@ class Api:
         return {"tipo": tipo, "valor": valor}
 
     @_api
+    def delete_valor(self, payload):
+        """Remove um valor de autocomplete cadastrado (marca/cor/combustível)."""
+        tipo = (payload.get("tipo") or "").strip().lower()
+        valor = (payload.get("valor") or "").strip()
+        if not valor:
+            raise ValueError("Informe o valor a remover.")
+        repo.delete_valor(self.con, tipo, valor)
+        self._audit("excluir", "parametro", None, f"{tipo.capitalize()} removida das sugestões: {valor}",
+                    {"tipo": tipo, "valor": valor})
+        return {"tipo": tipo, "valor": valor}
+
+    @_api
     def bootstrap(self):
         return {
             "empresa": self._empresa_sem_logo(),

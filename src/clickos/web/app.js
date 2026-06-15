@@ -62,6 +62,10 @@ function money(v) { return "R$ " + Number(num(v)).toLocaleString("pt-BR", { mini
 function fmtMoney(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtQtd(v) { return Number(num(v)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function today() { return ymd(new Date()); }  // data LOCAL (coerente com monthRange e com o date-picker)
+function nowLocal() { const d = new Date(); return ymd(d) + "T" + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+/* valor para <input type="datetime-local"> tolerando data-só ('YYYY-MM-DD') e timestamp ('YYYY-MM-DDTHH:MM') */
+function dtLocalVal(s) { s = String(s || ""); if (s.length >= 16 && (s[10] === "T" || s[10] === " ")) return s.slice(0, 10) + "T" + s.slice(11, 16); if (s.length >= 10 && s[4] === "-") return s.slice(0, 10) + "T00:00"; return ""; }
+function fmtDateTime(s) { s = String(s || ""); return s.length >= 16 && (s[10] === "T" || s[10] === " ") ? fmtDate(s.slice(0, 10)) + " " + s.slice(11, 16) : fmtDate(s); }
 function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
 function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -266,15 +270,29 @@ function comboText(items, value, opt) {
   const input = wrap.querySelector("input"), pop = wrap.querySelector(".combo-pop");
   input.value = value || "";
   const exact = () => items.some(x => getLabel(x).toLowerCase() === input.value.trim().toLowerCase());
+  // item removível (cadastro inline): opt.deletaveis pode ser um Set ou um predicado(valor)->bool
+  const podeDeletar = x => {
+    if (!opt.onDelete) return false;
+    if (!opt.deletaveis) return true;
+    const v = getLabel(x);
+    return typeof opt.deletaveis === "function" ? opt.deletaveis(v) : opt.deletaveis.has(v);
+  };
   function renderOpts() {
     ai = -1;
     const f = input.value.trim().toLowerCase();
     const matches = items.filter(x => getLabel(x).toLowerCase().includes(f)).slice(0, 60);
-    let html = matches.map((x, i) => `<div class="combo-opt" data-i="${i}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}</div>`).join("");
+    let html = matches.map((x, i) => `<div class="combo-opt${podeDeletar(x) ? " has-del" : ""}" data-i="${i}"><span>${esc(getLabel(x))}</span>${opt.getSub ? `<span class="sub">${esc(opt.getSub(x) || "")}</span>` : ""}${podeDeletar(x) ? `<button class="combo-del" data-i="${i}" title="Remover das sugestões">${ic("trash", 13)}</button>` : ""}</div>`).join("");
     if (!matches.length && !opt.onCreate) html = '<div class="combo-none">Sem sugestões — usado como texto</div>';
     if (opt.onCreate && input.value.trim() && !exact()) html += `<div class="combo-add">${ic("plus", 15)}<span>${esc(opt.createLabel ? opt.createLabel(input.value.trim()) : 'Cadastrar "' + input.value.trim() + '"')}</span></div>`;
     pop.innerHTML = html;
     pop.querySelectorAll(".combo-opt").forEach(o => o.onclick = () => { const x = matches[+o.dataset.i]; input.value = getLabel(x); close(); opt.onPick && opt.onPick(x); });
+    pop.querySelectorAll(".combo-del").forEach(b => b.onclick = async e => {
+      e.stopPropagation();
+      const val = getLabel(matches[+b.dataset.i]);
+      if ((await opt.onDelete(val)) === false) return;
+      items = items.filter(it => getLabel(it) !== val);
+      renderOpts();
+    });
     const add = pop.querySelector(".combo-add"); if (add) add.onclick = () => { pop.classList.remove("open"); opt.onCreate(input.value.trim()); };
   }
   function open() { renderOpts(); pop.classList.add("open"); placePop(input, pop); }
@@ -440,12 +458,12 @@ function renderDocsGrid(board, docs, onReload, isOS) {
     const veic = ((d.veiculo_placa || "") + (d.veiculo_marca ? " · " + d.veiculo_marca : "")).trim() || "—";
     const stTxt = d.situacao || d.status;
     const stCell = `<span class="badge ${statusClass(stTxt)}">${esc(stTxt)}</span>${isOS ? lateBadge(d) : ""}${prio !== "Normal" ? ` <span class="prio ${prio}">${prio}</span>` : ""}`;
-    const prevCell = isOS ? `<td class="${d.atrasado ? "td-late" : ""}">${d.previsao ? fmtDate(d.previsao) : "—"}</td>` : "";
+    const prevCell = isOS ? `<td class="${d.atrasado ? "td-late" : ""}" style="white-space:nowrap">${d.previsao ? fmtDateTime(d.previsao) : "—"}</td>` : "";
     const tr = h(`<tr${d.atrasado ? ' class="row-late"' : ""}>
       <td class="mono">${esc(d.numero)}</td>
       <td>${esc(d.cliente_nome || "—")}</td>
       <td>${esc(veic)}</td>
-      <td>${fmtDate(d.data_abertura)}</td>
+      <td style="white-space:nowrap">${fmtDateTime(d.data_abertura)}</td>
       ${prevCell}
       <td class="r money">${money(d.total)}</td>
       <td>${stCell}</td>
@@ -682,7 +700,7 @@ async function formOrcamento(id, opts) {
   setActive("orcamentos");
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
-    tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: today(),
+    tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: nowLocal(),
     cliente_id: "", veiculo_id: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, itens: [],
     forma_pagamento: "", validade: "", observacoes: (B.empresa && B.empresa.termos_padrao) || "",
     usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
@@ -691,10 +709,11 @@ async function formOrcamento(id, opts) {
   // novo orçamento: validade derivada da preferência atual; edição: preserva a validade já gravada
   const valTxt = (id && doc.validade) ? doc.validade : validadeTexto();
   render(`
-    <div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
+    <div class="between"><div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
       <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Orçamento ${doc.expirado ? '<span class="badge b-late" style="font-size:12px;vertical-align:middle">Expirado</span>' : ""}</h1><p class="page-sub" style="margin:0">Proposta comercial</p></div></div>
+      ${doc.os_vinculada_id ? `<button class="btn" id="ver_os" style="align-self:center">${ic("repeat", 16)}<span>Ver O.S. ${esc(doc.os_vinculada_numero || "")}</span></button>` : ""}</div>
     <div class="card mt"><h3 class="sec-title">Dados</h3>
-      <div class="grid3"><div class="field"><label>Data</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
+      <div class="grid3"><div class="field"><label>Data de Abertura</label><input type="datetime-local" id="f_data" value="${esc(dtLocalVal(doc.data_abertura) || nowLocal())}"></div>
         <div class="field"><label>Status</label><div id="c_status"></div></div>
         <div class="field"><label>Prioridade</label><div id="c_prio"></div></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
@@ -735,13 +754,17 @@ async function formOrcamento(id, opts) {
     itens: itens.map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo, quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })), lataria: [] });
   main().querySelector("#back").onclick = () => setView("orcamentos");
   main().querySelector("#cancel").onclick = () => setView("orcamentos");
+  const verOs = main().querySelector("#ver_os");
+  if (verOs) verOs.onclick = () => openOS(doc.os_vinculada_id);
+  const exigePessoa = () => { if (!cliCombo._value()) { toast("Selecione a pessoa do orçamento.", "err"); return false; } return true; };
   main().querySelector("#salvar").onclick = async () => {
+    if (!exigePessoa()) return;
     const saved = await api("save_documento", payloadDe()); toast("Orçamento salvo: " + saved.numero, "ok");
     if (opts.onSaved) opts.onSaved(saved); else setView("orcamentos");
   };
   // efetivar do form: salva as edições pendentes primeiro, depois efetiva o orçamento salvo
   const ef = main().querySelector("#efetivar");
-  if (ef) ef.onclick = async () => { const saved = await api("save_documento", payloadDe()); efetivarOrcamento(saved); };
+  if (ef) ef.onclick = async () => { if (!exigePessoa()) return; const saved = await api("save_documento", payloadDe()); efetivarOrcamento(saved); };
 }
 
 /* efetivar um orçamento -> cria a O.S. (Aberta) com os itens carregados para a entrada.
@@ -762,7 +785,7 @@ async function openOS(id, opts) {
   setActive("documentos");
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
-    tipo: "os", status: opts.faturada ? "Faturada" : "Aberta", prioridade: "Normal", data_abertura: today(), previsao: "",
+    tipo: "os", status: opts.faturada ? "Faturada" : "Aberta", prioridade: "Normal", data_abertura: nowLocal(), previsao: "", ordem_compra: "",
     cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, itens: [], lataria: [],
     forma_pagamento: "", observacoes: "", estado_geral: "", nivel_combustivel: "", obs_entrada: "", ocorrencia: "",
     parecer_mecanico: "", mecanico: "", faturado_em: "", origem_orcamento_id: null,
@@ -770,6 +793,7 @@ async function openOS(id, opts) {
     usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
   }, opts.prefill || {});
   const st = doc.status;
+  const ocExige = String((B.preferencias || {}).os_exige_oc) === "1";  // exige Nº O.C. no faturamento
   const itens = (doc.itens || []).map(i => ({ ...i }));
   const latMap = {}; (doc.lataria || []).forEach(p => latMap[p.peca] = p.estado);
   let nivelSel = doc.nivel_combustivel || "";
@@ -789,19 +813,20 @@ async function openOS(id, opts) {
     <div class="between"><div class="row"><button class="btn btn-sm" id="back">${ic("back", 16)}</button>
       <div><h1 class="page-title" style="font-size:24px">${titulo}${id ? " " + esc(doc.numero) : ""}</h1>
         <p class="page-sub" style="margin:0">${esc(doc.cliente_nome || "Nova")} ${doc.veiculo_placa ? "· " + esc(doc.veiculo_placa) : ""}${opts.fromOrcamento ? " · do orçamento " + esc(opts.fromOrcamento) : ""}</p></div></div>
-      <span style="align-self:center"><span class="badge ${statusClass(st)}" style="font-size:13px;padding:6px 12px">${esc(st)}</span>${lateBadge(doc)}</span></div>
+      <span style="align-self:center;display:inline-flex;gap:10px;align-items:center">${doc.origem_orcamento_id ? `<button class="btn btn-sm" id="ver_orc">${ic("doc", 15)}<span>Ver orçamento ${esc(doc.origem_numero || "")}</span></button>` : ""}<span class="badge ${statusClass(st)}" style="font-size:13px;padding:6px 12px">${esc(st)}</span>${lateBadge(doc)}</span></div>
 
     <div class="wiz-steps mt" id="osstep">${passos.map((p, i) => `<span class="wiz-pill ${i === idxAtual ? "on" : i < idxAtual ? "done" : ""}">${i + 1}. ${esc(p[1])}</span>`).join("")} ${isCancel ? '<span class="wiz-pill" style="background:#fee2e2;color:#991b1b">Cancelada</span>' : ""}</div>
 
     <div class="card mt"><div class="between"><h3 class="sec-title" style="margin:0">Dados da Entrada</h3>
       ${(!id && !opts.faturada) || (id && verItens && !isFat) ? `<button class="btn btn-sm" id="importar">${ic("repeat", 15)}<span>Importar orçamento</span></button>` : ""}</div>
-      <div class="grid3 mt"><div class="field"><label>Data de Abertura</label><input type="date" id="f_data" value="${esc(doc.data_abertura || today())}"></div>
+      <div class="grid3 mt"><div class="field"><label>Data de Abertura</label><input type="datetime-local" id="f_data" value="${esc(dtLocalVal(doc.data_abertura) || nowLocal())}"></div>
         <div class="field"><label>Prioridade</label><div id="c_prio"></div></div>
         <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
-      <div class="grid2"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
-        <div class="field"><label>Previsão de Entrega</label><input type="date" id="f_prev" value="${esc((doc.previsao || "").slice(0, 10))}"><span class="hint muted small">Opcional — usada para sinalizar atraso</span></div></div></div>
+      <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
+        <div class="field"><label>Previsão de Entrega</label><input type="datetime-local" id="f_prev" value="${esc(dtLocalVal(doc.previsao))}"><span class="hint muted small">Opcional — sinaliza atraso</span></div>
+        <div class="field"><label>Nº Ordem de Compra${ocExige ? " *" : ""}</label><input id="f_oc" value="${esc(doc.ordem_compra || "")}" placeholder="${ocExige ? "Exigida no faturamento" : "Opcional"}"></div></div></div>
 
     <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Checklist de Entrada</h3>${ic("chevron", 18)}</div>
       <div class="acc-body"><div class="muted small" style="margin:8px 0">Marque o estado de cada item da lataria.</div>
@@ -831,7 +856,7 @@ async function openOS(id, opts) {
 
     <div class="card mt" id="card-fatur" style="${verFatur ? "" : "display:none"}"><h3 class="sec-title">Faturamento</h3>
       <div class="grid3"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
-        <div class="field"><label>Data de Faturamento</label><input type="date" id="f_fatdata" value="${esc((doc.faturado_em || "").slice(0, 10) || doc.data_abertura || today())}"></div></div>
+        <div class="field"><label>Data de Faturamento</label><input type="datetime-local" id="f_fatdata" value="${esc(dtLocalVal(doc.faturado_em) || dtLocalVal(doc.data_abertura) || nowLocal())}"></div></div>
       <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div></div>
 
     <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancelar">${ic("back", 15)}<span>Voltar</span></button>
@@ -880,7 +905,7 @@ async function openOS(id, opts) {
     id: doc.id, tipo: "os", status, prioridade: prioCombo._value(), data_abertura: val("#f_data"),
     usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
     cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
-    previsao: val("#f_prev"),
+    previsao: val("#f_prev"), ordem_compra: val("#f_oc"),
     desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")),
     forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: doc.prazo_execucao || "", validade: doc.validade || "",
     observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel,
@@ -897,6 +922,9 @@ async function openOS(id, opts) {
   const validaPessoa = () => { if (!cliCombo._value()) { toast("Selecione a pessoa", "err"); return false; } return true; };
   const salvar = async (status, msg) => {
     if (!validaPessoa()) return null;
+    if (status === "Faturada" && ocExige && !val("#f_oc")) {
+      toast("Informe o Nº da Ordem de Compra para faturar (exigido nas preferências).", "err"); return null;
+    }
     const saved = await api("save_documento", payloadDe(status));
     // só agora (O.S. realmente criada) o orçamento de origem é marcado como Aprovado
     if (!id && doc.origem_orcamento_id) { try { await api("set_status", { id: doc.origem_orcamento_id, status: "Aprovado" }); } catch (e) {} }
@@ -940,6 +968,8 @@ async function openOS(id, opts) {
 
   main().querySelector("#back").onclick = () => setView("documentos");
   main().querySelector("#cancelar").onclick = () => setView("documentos");
+  const vorc = main().querySelector("#ver_orc");
+  if (vorc) vorc.onclick = () => formOrcamento(doc.origem_orcamento_id);
   const imp = main().querySelector("#importar");
   if (imp) imp.onclick = () => escolherOrcamento(orc => {
     // regra: assume o cliente e o veículo do orçamento; os produtos são ADICIONADOS aos itens atuais
@@ -1176,14 +1206,24 @@ function formVeiculo(v, clientes, opts) {
   const bg = openModal(m);
   bindUpper(m.querySelector("#placa")); bindInt(m.querySelector("#ano")); bindInt(m.querySelector("#renavam")); bindInt(m.querySelector("#km"));
   m.querySelector("#chassi").addEventListener("input", e => e.target.value = e.target.value.toUpperCase());
+  SUG.custom = SUG.custom || { marca: [], cor: [], combustivel: [] };
   const cadValor = (tipo, getCombo, listaKey, label) => async txt => {
     try { await api("add_valor", { tipo, valor: txt }); } catch (e) { return; }
     if (!SUG[listaKey].some(x => x.toLowerCase() === txt.toLowerCase())) SUG[listaKey].push(txt);
+    if (!(SUG.custom[tipo] || []).some(x => x.toLowerCase() === txt.toLowerCase())) (SUG.custom[tipo] = SUG.custom[tipo] || []).push(txt);
     const c = getCombo(); c._setItems(SUG[listaKey]); c._input.value = txt; toast(label + ' cadastrado(a)', "ok");
   };
-  const marcaC = comboText(SUG.marcas, v.marca || "", { placeholder: "Marca", getLabel: x => x, onCreate: cadValor("marca", () => marcaC, "marcas", "Marca"), createLabel: t => `Cadastrar marca "${t}"` }); m.querySelector("#c_marca").appendChild(marcaC);
-  const corC = comboText(SUG.cores, v.cor || "", { placeholder: "Cor", getLabel: x => x, onCreate: cadValor("cor", () => corC, "cores", "Cor"), createLabel: t => `Cadastrar cor "${t}"` }); m.querySelector("#c_cor").appendChild(corC);
-  const combC = comboText(SUG.combustiveis, v.combustivel || "", { placeholder: "Combustível", getLabel: x => x, onCreate: cadValor("combustivel", () => combC, "combustiveis", "Combustível"), createLabel: t => `Cadastrar "${t}"` }); m.querySelector("#c_comb").appendChild(combC);
+  // remove um valor de autocomplete cadastrado pelo usuário (só os custom mostram o botão de lixeira)
+  const delValor = (tipo, listaKey) => async val => {
+    try { await api("delete_valor", { tipo, valor: val }); } catch (e) { return false; }
+    SUG[listaKey] = SUG[listaKey].filter(x => x !== val);
+    SUG.custom[tipo] = (SUG.custom[tipo] || []).filter(x => x !== val);
+    toast(`"${val}" removido das sugestões`, "ok");
+  };
+  const ehCustom = tipo => val => (SUG.custom[tipo] || []).some(x => x.toLowerCase() === String(val).toLowerCase());
+  const marcaC = comboText(SUG.marcas, v.marca || "", { placeholder: "Marca", getLabel: x => x, onCreate: cadValor("marca", () => marcaC, "marcas", "Marca"), createLabel: t => `Cadastrar marca "${t}"`, deletaveis: ehCustom("marca"), onDelete: delValor("marca", "marcas") }); m.querySelector("#c_marca").appendChild(marcaC);
+  const corC = comboText(SUG.cores, v.cor || "", { placeholder: "Cor", getLabel: x => x, onCreate: cadValor("cor", () => corC, "cores", "Cor"), createLabel: t => `Cadastrar cor "${t}"`, deletaveis: ehCustom("cor"), onDelete: delValor("cor", "cores") }); m.querySelector("#c_cor").appendChild(corC);
+  const combC = comboText(SUG.combustiveis, v.combustivel || "", { placeholder: "Combustível", getLabel: x => x, onCreate: cadValor("combustivel", () => combC, "combustiveis", "Combustível"), createLabel: t => `Cadastrar "${t}"`, deletaveis: ehCustom("combustivel"), onDelete: delValor("combustivel", "combustiveis") }); m.querySelector("#c_comb").appendChild(combC);
   let propC = null;
   if (!lockOwner) {
     propC = comboSelect(clientes, v.cliente_id || null, { placeholder: "Buscar/selecionar pessoa...", getLabel: c => c.nome, getSub: c => c.cpf_cnpj || "",
@@ -1390,7 +1430,6 @@ const AUDIT_ACOES = {
 };
 const AUDIT_ENT = { cliente: "Pessoa", veiculo: "Veículo", item: "Produto/Serviço", documento: "Documento",
   usuario: "Usuário", empresa: "Empresa", preferencias: "Preferências", parametro: "Parâmetro" };
-function fmtDateTime(s) { s = String(s || ""); return s.length >= 16 ? fmtDate(s.slice(0, 10)) + " " + s.slice(11, 16) : fmtDate(s); }
 function fmtAuditVal(v) { if (v === null || v === undefined || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v); }
 
 async function renderAuditoria(container) {
@@ -1481,7 +1520,9 @@ async function renderPreferencias(container) {
       <div class="pref-row"><label>Sinalizar atraso após</label>
         <input type="number" min="0" id="p_os_qtd" class="pref-num" value="${esc(prefs.os_atraso_qtd)}">
         <select id="p_os_uni" class="pref-sel">${uOpts(prefs.os_atraso_unidade)}</select>
-        <span class="muted small">além da previsão</span></div></div>
+        <span class="muted small">além da previsão</span></div>
+      <div class="pref-row" style="margin-top:14px"><label>Ordem de Compra</label>
+        <label class="pref-check"><input type="checkbox" id="p_oc" ${String(prefs.os_exige_oc) === "1" ? "checked" : ""}> Exigir Nº de Ordem de Compra ao faturar a O.S.</label></div></div>
 
     <div class="between mt"><span></span><button class="btn btn-primary" id="p_save">${ic("save", 16)}<span>Salvar preferências</span></button></div>`;
   injectIcons(container);
@@ -1493,6 +1534,7 @@ async function renderPreferencias(container) {
     const payload = {
       orc_validade_qtd: val("#p_orc_qtd") || "0", orc_validade_unidade: container.querySelector("#p_orc_uni").value,
       os_atraso_qtd: val("#p_os_qtd") || "0", os_atraso_unidade: container.querySelector("#p_os_uni").value,
+      os_exige_oc: container.querySelector("#p_oc").checked ? "1" : "0",
     };
     B.preferencias = await api("save_preferencias", payload);
     toast("Preferências salvas", "ok");

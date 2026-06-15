@@ -18,7 +18,10 @@ def _brl(v) -> str:
 def _dt(s) -> str:
     s = str(s or "")
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        return f"{s[8:10]}/{s[5:7]}/{s[0:4]}"
+        data = f"{s[8:10]}/{s[5:7]}/{s[0:4]}"
+        if len(s) >= 16 and s[10] in ("T", " "):  # timestamp: acrescenta hora:minuto
+            return f"{data} {s[11:16]}"
+        return data
     return s
 
 

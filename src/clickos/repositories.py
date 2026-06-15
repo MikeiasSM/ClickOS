@@ -169,6 +169,7 @@ PREF_DEFAULTS = {
     "orc_validade_unidade": "dias",
     "os_atraso_qtd": "1",
     "os_atraso_unidade": "dias",
+    "os_exige_oc": "0",  # exigir Nº de Ordem de Compra ao faturar a O.S.
 }
 
 
@@ -226,7 +227,7 @@ class _Documentos:
             "prazo_execucao", "validade", "observacoes", "estado_geral", "nivel_combustivel",
             "obs_entrada", "item_chave_principal", "item_chave_reserva", "item_documento", "item_manual",
             "origem_orcamento_id", "usuario_id",
-            "ocorrencia", "parecer_mecanico", "mecanico"]  # faturado_em é carimbado pelo sistema
+            "ocorrencia", "parecer_mecanico", "mecanico", "ordem_compra"]  # faturado_em é carimbado pelo sistema
 
     def create(self, con, data, stamp=None):
         now = _now(stamp)
@@ -237,6 +238,8 @@ class _Documentos:
         data.setdefault("desconto_geral", 0)
         data.setdefault("desconto_tipo", "valor")
         data.setdefault("acrescimo", 0)
+        if not data.get("cliente_id"):
+            raise ValueError("Selecione a pessoa antes de salvar o documento.")
         numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))
         itens = data.get("itens") or []
         tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
@@ -257,6 +260,11 @@ class _Documentos:
         itens = data.get("itens") or []
         if data.get("status") == "Faturada" and not itens:
             raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
+        novo_status = data.get("status")
+        if novo_status:
+            row_t = con.execute("SELECT tipo FROM documentos WHERE id=?", (did,)).fetchone()
+            self._guarda_cancelamento(con, did, novo_status, row_t["tipo"] if row_t else data.get("tipo"))
+            self._guarda_oc_faturamento(con, did, novo_status, data)
         # Campos financeiros ausentes no payload herdam o que já está gravado: assim o total nunca é
         # recalculado com desconto/acréscimo zerados nem com o tipo de desconto errado (R$ vs %).
         atual = con.execute("SELECT desconto_geral, desconto_tipo, acrescimo FROM documentos WHERE id=?",
@@ -300,8 +308,40 @@ class _Documentos:
             con.execute("INSERT INTO documento_lataria(documento_id,peca,estado,ordem) VALUES(?,?,?,?)",
                         (did, peca, marcado.get(peca, ""), ordem))
 
+    def _os_vinculada(self, con, orc_id):
+        """(id, numero) da O.S. gerada a partir deste orçamento, ou (None, None)."""
+        r = con.execute("SELECT id, numero FROM documentos WHERE tipo='os' AND origem_orcamento_id=? "
+                        "ORDER BY id DESC LIMIT 1", (orc_id,)).fetchone()
+        return (r["id"], r["numero"]) if r else (None, None)
+
+    def _guarda_cancelamento(self, con, did, novo_status, tipo_atual):
+        """Impede cancelar/recusar um orçamento que já gerou uma O.S."""
+        if tipo_atual == "orcamento" and novo_status in ("Cancelado", "Recusado"):
+            vid, vnum = self._os_vinculada(con, did)
+            if vid:
+                raise ValueError(
+                    f"Este orçamento gerou a O.S. {vnum} e não pode ser cancelado/recusado. "
+                    "Cancele a O.S. vinculada primeiro, se necessário.")
+
+    def _guarda_oc_faturamento(self, con, did, novo_status, data):
+        """Se a preferência exigir, bloqueia faturar a O.S. sem Nº de Ordem de Compra."""
+        if novo_status != "Faturada":
+            return
+        if str(get_preferencias(con).get("os_exige_oc")) not in ("1", "true", "True"):
+            return
+        if "ordem_compra" in (data or {}):
+            oc = data.get("ordem_compra")
+        else:
+            row = con.execute("SELECT ordem_compra FROM documentos WHERE id=?", (did,)).fetchone()
+            oc = row["ordem_compra"] if row else None
+        if not (oc or "").strip():
+            raise ValueError("Informe o Nº da Ordem de Compra para faturar esta O.S. (exigido nas preferências).")
+
     def set_status(self, con, did, status, stamp=None):
         now = _now(stamp)
+        row_t = con.execute("SELECT tipo FROM documentos WHERE id=?", (did,)).fetchone()
+        self._guarda_cancelamento(con, did, status, row_t["tipo"] if row_t else None)
+        self._guarda_oc_faturamento(con, did, status, {})
         if status == "Faturada":  # faturar exige ao menos um serviço (vale também p/ o arrastar do kanban)
             if not con.execute("SELECT COUNT(*) FROM documento_itens WHERE documento_id=?", (did,)).fetchone()[0]:
                 raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
@@ -326,6 +366,12 @@ class _Documentos:
             "SELECT * FROM documento_itens WHERE documento_id=? ORDER BY ordem", (did,)).fetchall())
         d["lataria"] = _rows(con.execute(
             "SELECT * FROM documento_lataria WHERE documento_id=? ORDER BY ordem", (did,)).fetchall())
+        # vínculo bidirecional orçamento ↔ O.S. (para navegar entre os dependentes)
+        if d.get("tipo") == "orcamento":
+            d["os_vinculada_id"], d["os_vinculada_numero"] = self._os_vinculada(con, did)
+        if d.get("origem_orcamento_id"):
+            o = con.execute("SELECT numero FROM documentos WHERE id=?", (d["origem_orcamento_id"],)).fetchone()
+            d["origem_numero"] = o["numero"] if o else None
         _anota_situacao(d, get_preferencias(con), datetime.now())
         return d
 
@@ -529,7 +575,18 @@ def sugestoes(con):
         "cores": merge(dbmod.SUG_CORES, distinct("veiculos", "cor"), custom("cor")),
         "combustiveis": merge(dbmod.SUG_COMBUSTIVEIS, distinct("veiculos", "combustivel"), custom("combustivel")),
         "cidades": merge(dbmod.SUG_CIDADES, distinct("clientes", "cidade")),
+        # valores cadastrados pelo usuário (apenas estes podem ser removidos das sugestões)
+        "custom": {"marca": custom("marca"), "cor": custom("cor"), "combustivel": custom("combustivel")},
     }
+
+
+def delete_valor(con, tipo, valor):
+    """Remove um valor de autocomplete cadastrado pelo usuário (marca/cor/combustivel)."""
+    tipo = (tipo or "").strip().lower()
+    if tipo not in ("marca", "cor", "combustivel"):
+        raise services.EmVinculo("Tipo inválido.")
+    con.execute("DELETE FROM valores_custom WHERE tipo=? AND valor=?", (tipo, valor))
+    con.commit()
 
 
 # --------------------------------------------------------------------------- auditoria (somente leitura)

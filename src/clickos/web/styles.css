@@ -433,3 +433,12 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .audit-note{display:flex;align-items:center;gap:7px;margin:10px 2px 12px}
 .audit-note .icon{flex:0 0 auto;opacity:.65}
 .audit-json{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;font-size:12px;margin:0;white-space:pre-wrap}
+
+/* botão de remover valor cadastrado (aparece no hover do item do combobox) */
+.combo-del{border:0;background:transparent;color:#cbd5e1;cursor:pointer;padding:2px 5px;border-radius:6px;
+  display:inline-flex;align-items:center;opacity:0;flex:0 0 auto}
+.combo-opt:hover .combo-del{opacity:1}
+.combo-del:hover{background:#fef2f2;color:var(--red)}
+/* checkbox inline nas preferências */
+.pref-check{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#334155;font-weight:500}
+.pref-check input{width:auto;margin:0}

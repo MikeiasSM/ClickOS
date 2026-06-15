@@ -70,6 +70,7 @@
           <tr><td class="lbl">STATUS</td><td>{{ doc.status }}</td></tr>
           {% if doc.usuario_nome %}<tr><td class="lbl">ATEND.</td><td>{{ doc.usuario_nome }}</td></tr>{% endif %}
           {% if doc.faturado_em %}<tr><td class="lbl">FATUR.</td><td>{{ doc.faturado_em|dt }}</td></tr>{% endif %}
+          {% if doc.ordem_compra %}<tr><td class="lbl">O.C.</td><td>{{ doc.ordem_compra }}</td></tr>{% endif %}
         </table>
       </td>
     </tr>
