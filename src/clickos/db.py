@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS documentos (
   cliente_id INTEGER REFERENCES clientes(id), veiculo_id INTEGER REFERENCES veiculos(id),
   km_entrada TEXT,
   subtotal REAL DEFAULT 0, desconto_geral REAL DEFAULT 0, desconto_tipo TEXT DEFAULT 'valor',
-  acrescimo REAL DEFAULT 0, total REAL DEFAULT 0,
+  acrescimo REAL DEFAULT 0, acrescimo_tipo TEXT DEFAULT 'valor', total REAL DEFAULT 0,
   forma_pagamento TEXT, prazo_execucao TEXT, validade TEXT, observacoes TEXT,
   estado_geral TEXT, nivel_combustivel TEXT, obs_entrada TEXT,
   item_chave_principal INTEGER DEFAULT 0, item_chave_reserva INTEGER DEFAULT 0,
@@ -221,6 +221,9 @@ def _migrate(con: sqlite3.Connection) -> None:
     if ver < 10:
         _add_column(con, "documentos", "ordem_compra", "TEXT")
         con.execute("UPDATE meta SET schema_version = 10")
+    if ver < 11:
+        _add_column(con, "documentos", "acrescimo_tipo", "TEXT DEFAULT 'valor'")
+        con.execute("UPDATE meta SET schema_version = 11")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)

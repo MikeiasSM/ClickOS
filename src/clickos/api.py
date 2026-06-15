@@ -8,6 +8,7 @@ import webview
 
 from . import audit
 from . import db as dbmod
+from . import excel_export
 from . import paths
 from . import printing
 from . import repositories as repo
@@ -143,7 +144,7 @@ class Api:
             "pecas": dbmod.LISTA_PECAS,
             "preferencias": repo.get_preferencias(self.con),
             "unidades_tempo": list(services.UNIDADES_SEG.keys()),
-            "audit_acoes": ["criar", "editar", "excluir", "status", "parametro",
+            "audit_acoes": ["criar", "editar", "excluir", "status", "parametro", "exportar",
                             "login", "logout", "login_falha", "backup", "restaurar"],
         }
 
@@ -294,6 +295,29 @@ class Api:
     def print_recebimento(self, did):
         doc, html = self._render(did, printing.render_recebimento)
         return {"html": html, "numero": doc["numero"]}
+
+    @_api
+    def export_excel(self, did):
+        """Exporta o documento para .xlsx (mesmo layout do impresso, editável). Pergunta onde salvar."""
+        doc = repo.documentos.get(self.con, did)
+        if not doc:
+            raise ValueError("Documento não encontrado.")
+        cliente = repo.clientes.get(self.con, doc["cliente_id"]) if doc.get("cliente_id") else {}
+        veiculo = repo.veiculos.get(self.con, doc["veiculo_id"]) if doc.get("veiculo_id") else {}
+        empresa = dict(self.con.execute("SELECT * FROM empresa WHERE id=1").fetchone())
+        dados = excel_export.gerar(doc, empresa, cliente, veiculo)
+        res = self._win().create_file_dialog(
+            webview.SAVE_DIALOG, save_filename=f"{doc['numero']}.xlsx",
+            file_types=("Planilha Excel (*.xlsx)", "Todos os arquivos (*.*)"))
+        if not res:
+            return {"cancelado": True}
+        dest = res if isinstance(res, str) else res[0]
+        if not str(dest).lower().endswith(".xlsx"):
+            dest = str(dest) + ".xlsx"
+        Path(dest).write_bytes(dados)
+        self._audit("exportar", "documento", did, f"{_doc_label(doc)} {doc['numero']} exportado para Excel",
+                    {"arquivo": dest})
+        return {"arquivo": dest}
 
     # ----------------------------------------------------------------- clientes
     @_api

@@ -177,8 +177,14 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
 .combo-input input{border:0;outline:0;flex:1;min-width:0;padding:9px 0;background:transparent;font-size:14px;cursor:text}
 .combo-input .icon{opacity:.45;flex:none}
 .combo-pop{position:absolute;z-index:70;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--line);border-radius:10px;
-  box-shadow:0 10px 28px rgba(0,0,0,.14);max-height:260px;overflow:auto;display:none}
+  box-shadow:0 10px 28px rgba(0,0,0,.14);max-height:260px;overflow-y:auto;overflow-x:hidden;display:none;
+  scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
 .combo-pop.open{display:block}
+/* scrollbar sutil que não “come” o border-radius (track transparente + thumb afastado das bordas) */
+.combo-pop::-webkit-scrollbar{width:11px}
+.combo-pop::-webkit-scrollbar-track{background:transparent;margin:8px 0}
+.combo-pop::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px;border:3px solid transparent;background-clip:padding-box}
+.combo-pop::-webkit-scrollbar-thumb:hover{background:#94a3b8;border:3px solid transparent;background-clip:padding-box}
 .combo-opt{padding:10px 12px;cursor:pointer;font-size:14px;display:flex;justify-content:space-between;gap:10px;align-items:center}
 .combo-opt:hover,.combo-opt.active{background:#eff6ff}
 .combo-opt .sub{color:var(--muted);font-size:12px;white-space:nowrap}
@@ -383,10 +389,16 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 
 /* ---- Wave 2: desconto R$/%, filtros, grid de listagem, atraso, preferências ---- */
 /* alternância de desconto (R$ / %) na linha de totais */
-.desc-wrap{display:inline-flex;align-items:center;gap:8px}
-.desc-eq{min-width:60px;text-align:right}
-.desc-seg button{padding:4px 11px;font-weight:600;color:#475569}
-.desc-seg button.on{background:var(--blue);color:#fff}
+/* totalizadores do documento (orçamento/O.S.) — bloco alinhado à direita, total destacado */
+.totais{margin:8px 0 2px auto;max-width:440px;display:flex;flex-direction:column}
+.totais .tot-line{padding:9px 2px;border-bottom:1px dashed #eef2f7}
+.tot-total{border-bottom:0!important;border-top:2px solid var(--line);margin-top:6px;padding-top:14px!important;
+  font-size:21px;font-weight:800;color:var(--blue)}
+.ajuste-wrap{display:inline-flex;align-items:center;gap:8px}
+.ajuste-eq{min-width:58px;text-align:right}
+.ajuste-in{width:120px;text-align:right}
+.ajuste-seg button{padding:4px 11px;font-weight:600;color:#475569}
+.ajuste-seg button.on{background:var(--blue);color:#fff}
 .field .hint{display:block;margin-top:4px;color:var(--muted)}
 
 /* barra de filtros (busca + período) — tudo em uma única linha */
@@ -442,3 +454,38 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 /* checkbox inline nas preferências */
 .pref-check{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#334155;font-weight:500}
 .pref-check input{width:auto;margin:0}
+
+/* datetime picker customizado */
+.dtp{position:relative}
+.dtp-field{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:6px;background:#fff;overflow:hidden}
+.dtp-field:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+.dtp-input{border:0;flex:1;min-width:0;padding:9px 10px;cursor:pointer;background:transparent;font-size:14px}
+.dtp-btn{border:0;border-left:1px solid var(--line);background:#f8fafc;color:#475569;padding:0 11px;cursor:pointer;display:flex;align-items:center}
+.dtp-btn:hover{background:#eff6ff;color:var(--blue)}
+.dtp-pop{position:absolute;z-index:80;top:calc(100% + 6px);left:0;width:300px;background:#fff;border:1px solid var(--line);
+  border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.20);padding:12px;display:none}
+.dtp-pop.open{display:block}
+.dtp-pop.right{left:auto;right:0}
+.dtp-pop.up{top:auto;bottom:calc(100% + 6px)}
+.dtp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.dtp-title{font-weight:700;font-size:14px}
+.dtp-nav{border:0;background:#f1f5f9;border-radius:8px;width:30px;height:30px;cursor:pointer;color:#475569;display:flex;align-items:center;justify-content:center}
+.dtp-nav:hover{background:var(--blue);color:#fff}
+.dtp-next{transform:rotate(180deg)}
+.dtp-dows{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px}
+.dtp-dows span{text-align:center;font-size:11px;color:var(--muted);font-weight:700}
+.dtp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.dtp-day{border:0;background:transparent;border-radius:8px;height:34px;cursor:pointer;font-size:13px;color:#334155}
+.dtp-day.empty{visibility:hidden;cursor:default}
+.dtp-day:hover{background:#eff6ff}
+.dtp-day.hoje{box-shadow:inset 0 0 0 1.5px var(--blue);color:var(--blue);font-weight:700}
+.dtp-day.sel{background:var(--blue);color:#fff;font-weight:700}
+.dtp-time{display:flex;align-items:center;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:#475569}
+.dtp-time .icon{color:var(--blue)}
+.dtp-time input{width:52px;text-align:center;padding:6px;border:1px solid var(--line);border-radius:7px}
+.dtp-time b{font-weight:800}
+.dtp-actions{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
+.dtp-actions button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;color:#475569}
+.dtp-actions button:hover{background:#f1f5f9}
+.dtp-actions .dtp-ok{background:var(--blue);color:#fff;border-color:var(--blue)}
+.dtp-actions .dtp-ok:hover{background:#1d4ed8}

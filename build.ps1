@@ -9,6 +9,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --name ClickOS `
   --add-data "src/clickos/templates;clickos/templates" `
   --add-data "src/clickos/assets;clickos/assets" `
   --collect-all webview `
+  --collect-all openpyxl `
   run.py
 
 Write-Host "`nPronto: dist\ClickOS.exe"

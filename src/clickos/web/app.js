@@ -33,6 +33,10 @@ const ICONS = {
   dollar: '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
   back: '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
   chevron: '<polyline points="6 9 12 15 18 9"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  sheet: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
   phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/>',
   mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/>',
@@ -66,6 +70,62 @@ function nowLocal() { const d = new Date(); return ymd(d) + "T" + String(d.getHo
 /* valor para <input type="datetime-local"> tolerando data-só ('YYYY-MM-DD') e timestamp ('YYYY-MM-DDTHH:MM') */
 function dtLocalVal(s) { s = String(s || ""); if (s.length >= 16 && (s[10] === "T" || s[10] === " ")) return s.slice(0, 10) + "T" + s.slice(11, 16); if (s.length >= 10 && s[4] === "-") return s.slice(0, 10) + "T00:00"; return ""; }
 function fmtDateTime(s) { s = String(s || ""); return s.length >= 16 && (s[10] === "T" || s[10] === " ") ? fmtDate(s.slice(0, 10)) + " " + s.slice(11, 16) : fmtDate(s); }
+/* ---- datetime picker customizado (cores do app) ---- */
+function _pad2(n) { return String(n).padStart(2, "0"); }
+function _nowParts() { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth(), d: d.getDate(), h: d.getHours(), min: d.getMinutes() }; }
+function _parseDT(s) { s = String(s || ""); let m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/); if (m) return { y: +m[1], m: +m[2] - 1, d: +m[3], h: +m[4], min: +m[5] }; m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return { y: +m[1], m: +m[2] - 1, d: +m[3], h: 0, min: 0 }; return null; }
+function _clampInt(v, lo, hi) { v = parseInt(v, 10); if (isNaN(v)) v = lo; return Math.max(lo, Math.min(hi, v)); }
+const _MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+/* Cria um seletor de data+hora. value: 'YYYY-MM-DDTHH:MM'. _value()/_setValue(v) na API do elemento. */
+function dtPicker(value, opts) {
+  opts = opts || {};
+  let sel = _parseDT(value), viewY, viewM;
+  const wrap = h(`<div class="dtp"><div class="dtp-field"><input class="dtp-input" placeholder="${esc(opts.placeholder || "dd/mm/aaaa --:--")}" readonly>
+    <button type="button" class="dtp-btn" title="Escolher data e hora">${ic("calendar", 16)}</button></div><div class="dtp-pop"></div></div>`);
+  const input = wrap.querySelector(".dtp-input"), btnEl = wrap.querySelector(".dtp-btn"), pop = wrap.querySelector(".dtp-pop");
+  const valueStr = () => sel ? `${sel.y}-${_pad2(sel.m + 1)}-${_pad2(sel.d)}T${_pad2(sel.h)}:${_pad2(sel.min)}` : "";
+  const fmtIn = () => { input.value = sel ? `${_pad2(sel.d)}/${_pad2(sel.m + 1)}/${sel.y} ${_pad2(sel.h)}:${_pad2(sel.min)}` : ""; };
+  function render() {
+    const base = sel || _nowParts();
+    if (viewY == null) viewY = base.y; if (viewM == null) viewM = base.m;
+    const first = new Date(viewY, viewM, 1).getDay(), dias = new Date(viewY, viewM + 1, 0).getDate(), hoje = _nowParts();
+    let grid = "";
+    for (let i = 0; i < first; i++) grid += `<span class="dtp-day empty"></span>`;
+    for (let d = 1; d <= dias; d++) {
+      const isSel = sel && sel.y === viewY && sel.m === viewM && sel.d === d;
+      const isHoje = hoje.y === viewY && hoje.m === viewM && hoje.d === d;
+      grid += `<button type="button" class="dtp-day${isSel ? " sel" : ""}${isHoje ? " hoje" : ""}" data-d="${d}">${d}</button>`;
+    }
+    const h0 = sel ? sel.h : 0, m0 = sel ? sel.min : 0;
+    pop.innerHTML = `<div class="dtp-head"><button type="button" class="dtp-nav" data-nav="-1">${ic("back", 16)}</button>
+        <span class="dtp-title">${_MESES[viewM]} ${viewY}</span>
+        <button type="button" class="dtp-nav dtp-next" data-nav="1">${ic("back", 16)}</button></div>
+      <div class="dtp-dows"><span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span></div>
+      <div class="dtp-grid">${grid}</div>
+      <div class="dtp-time">${ic("clock", 15)}<input class="dtp-h" type="number" min="0" max="23" value="${_pad2(h0)}"><b>:</b><input class="dtp-m" type="number" min="0" max="59" value="${_pad2(m0)}"></div>
+      <div class="dtp-actions"><button type="button" class="dtp-clear">Limpar</button><button type="button" class="dtp-now">Agora</button><button type="button" class="dtp-ok">OK</button></div>`;
+    const getHM = () => ({ h: _clampInt(pop.querySelector(".dtp-h").value, 0, 23), min: _clampInt(pop.querySelector(".dtp-m").value, 0, 59) });
+    pop.querySelectorAll(".dtp-nav").forEach(b => b.onclick = () => { viewM += +b.dataset.nav; if (viewM < 0) { viewM = 11; viewY--; } if (viewM > 11) { viewM = 0; viewY++; } render(); });
+    pop.querySelectorAll(".dtp-day[data-d]").forEach(b => b.onclick = () => { const hm = getHM(); sel = { y: viewY, m: viewM, d: +b.dataset.d, h: hm.h, min: hm.min }; render(); });
+    pop.querySelector(".dtp-clear").onclick = () => { sel = null; fmtIn(); close(); if (opts.onChange) opts.onChange(""); };
+    pop.querySelector(".dtp-now").onclick = () => { sel = _nowParts(); viewY = sel.y; viewM = sel.m; render(); };
+    pop.querySelector(".dtp-ok").onclick = () => { if (sel) { const hm = getHM(); sel.h = hm.h; sel.min = hm.min; } fmtIn(); close(); if (opts.onChange) opts.onChange(valueStr()); };
+  }
+  function place() {
+    pop.classList.remove("right", "up");
+    const r = wrap.getBoundingClientRect();
+    if (r.left + 304 > window.innerWidth) pop.classList.add("right");
+    if (window.innerHeight - r.bottom < 360 && r.top > 360) pop.classList.add("up");
+  }
+  function open() { render(); pop.classList.add("open"); place(); }
+  function close() { pop.classList.remove("open"); }
+  btnEl.onclick = () => pop.classList.contains("open") ? close() : open();
+  input.onclick = () => open();
+  document.addEventListener("mousedown", e => { if (!wrap.contains(e.target)) close(); });
+  fmtIn();
+  wrap._value = valueStr; wrap._setValue = v => { sel = _parseDT(v); fmtIn(); };
+  return wrap;
+}
 function loginFromNome(s) { return String(s || "").normalize("NFD").replace(/[^\x00-\x7F]/g, "").toUpperCase(); }
 function fmtDate(s) { s = String(s || ""); return (s.length >= 10 && s[4] === "-") ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : s; }
 function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
@@ -77,26 +137,26 @@ function validadeTexto(prefs) {
   const L = { horas: ["hora", "horas"], dias: ["dia", "dias"], semanas: ["semana", "semanas"], meses: ["mês", "meses"] }[prefs.orc_validade_unidade] || ["dia", "dias"];
   return "Orçamento válido por " + q + " " + (q === 1 ? L[0] : L[1]);
 }
-/* HTML da linha de desconto geral com alternância R$ / % */
-function descLineHtml(doc) {
-  const isPct = doc.desconto_tipo === "percent";
-  return `<div class="tot-line"><span class="muted">Desconto geral</span>
-    <span class="desc-wrap"><span class="muted small desc-eq" id="desc_eq"></span>
-      <span class="seg desc-seg"><button type="button" data-t="valor" class="${isPct ? "" : "on"}">R$</button><button type="button" data-t="percent" class="${isPct ? "on" : ""}">%</button></span>
-      <input id="f_desc" class="money-in" style="width:120px;text-align:right" value="${doc.desconto_geral || 0}"></span></div>`;
+/* linha de ajuste (Desconto/Acréscimo) com alternância R$ / %. `base` = id do input (f_desc/f_acr). */
+function ajusteLineHtml(label, base, valor, tipo) {
+  const isPct = tipo === "percent";
+  return `<div class="tot-line"><span class="muted">${label}</span>
+    <span class="ajuste-wrap"><span class="muted small ajuste-eq" id="${base}_eq"></span>
+      <span class="seg ajuste-seg ${base}-seg"><button type="button" data-t="valor" class="${isPct ? "" : "on"}">R$</button><button type="button" data-t="percent" class="${isPct ? "on" : ""}">%</button></span>
+      <input id="${base}" class="money-in ajuste-in" value="${valor || 0}"></span></div>`;
 }
-/* Liga a alternância R$/% e o input #f_desc ao recalc. Devolve um getter do tipo atual. */
-function bindDescLine(recalc, tipoInicial) {
+/* Liga a alternância R$/% e o input ao recalc. Devolve um getter do tipo atual. */
+function bindAjusteLine(base, recalc, tipoInicial) {
   let tipo = tipoInicial === "percent" ? "percent" : "valor";
-  const seg = main().querySelector(".desc-seg"), fd = main().querySelector("#f_desc");
+  const seg = main().querySelector("." + base + "-seg"), fd = main().querySelector("#" + base);
   bindMoney(fd); fd.oninput = recalc;
   seg.querySelectorAll("button").forEach(b => b.onclick = () => {
     tipo = b.dataset.t; seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); recalc();
   });
   return () => tipo;
 }
-/* desconto resolvido em R$ (aplica % sobre o subtotal quando for o caso) */
-function descResolvido(sub, tipo) { const dv = num(val("#f_desc")); return tipo === "percent" ? sub * dv / 100 : dv; }
+/* ajuste resolvido em R$ (aplica % sobre o subtotal quando for o caso) */
+function ajusteResolvido(sub, base, tipo) { const v = num(val("#" + base)); return tipo === "percent" ? sub * v / 100 : v; }
 function btn(label, icon, onclick, cls) { const b = h(`<button class="btn btn-sm ${cls || ""}">${icon ? ic(icon, 15) : ""}${label ? `<span>${esc(label)}</span>` : ""}</button>`); b.onclick = onclick; return b; }
 
 /* máscaras */
@@ -204,7 +264,9 @@ function viewToggle(screen, current, options, onChange) {
 /* Posiciona o popover do combobox. Dentro de um modal (que tem overflow), usa position:fixed
    ancorado na viewport para ESCAPAR do recorte do modal; fora de modal mantém o absolute. */
 function placePop(input, pop) {
-  const r = input.getBoundingClientRect();
+  // mede o container do combo (não só o <input>) para o dropdown ter a MESMA largura do campo
+  const box = input.closest(".combo") || input;
+  const r = box.getBoundingClientRect();
   const sc = input.closest(".modal");
   if (sc) {
     pop.classList.add("fixed");
@@ -701,7 +763,7 @@ async function formOrcamento(id, opts) {
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
     tipo: "orcamento", status: "Aberto", prioridade: "Normal", data_abertura: nowLocal(),
-    cliente_id: "", veiculo_id: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, itens: [],
+    cliente_id: "", veiculo_id: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, acrescimo_tipo: "valor", itens: [],
     forma_pagamento: "", validade: "", observacoes: (B.empresa && B.empresa.termos_padrao) || "",
     usuario_id: (CURRENT_USER && CURRENT_USER.id) || null,
   }, opts.prefill || {});
@@ -713,17 +775,17 @@ async function formOrcamento(id, opts) {
       <div><h1 class="page-title" style="font-size:24px">${id ? "Editar" : "Novo"} Orçamento ${doc.expirado ? '<span class="badge b-late" style="font-size:12px;vertical-align:middle">Expirado</span>' : ""}</h1><p class="page-sub" style="margin:0">Proposta comercial</p></div></div>
       ${doc.os_vinculada_id ? `<button class="btn" id="ver_os" style="align-self:center">${ic("repeat", 16)}<span>Ver O.S. ${esc(doc.os_vinculada_numero || "")}</span></button>` : ""}</div>
     <div class="card mt"><h3 class="sec-title">Dados</h3>
-      <div class="grid3"><div class="field"><label>Data de Abertura</label><input type="datetime-local" id="f_data" value="${esc(dtLocalVal(doc.data_abertura) || nowLocal())}"></div>
+      <div class="grid3"><div class="field"><label>Data de Abertura</label><div id="c_data"></div></div>
         <div class="field"><label>Status</label><div id="c_status"></div></div>
         <div class="field"><label>Prioridade</label><div id="c_prio"></div></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div></div>
     <div class="card mt"><h3 class="sec-title">Itens</h3><div id="itens-box"></div>
-      <hr class="sep">
-      <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
-      ${descLineHtml(doc)}
-      <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
-      <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
+      <div class="totais">
+        <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
+        ${ajusteLineHtml("Desconto", "f_desc", doc.desconto_geral, doc.desconto_tipo)}
+        ${ajusteLineHtml("Acréscimo", "f_acr", doc.acrescimo, doc.acrescimo_tipo)}
+        <div class="tot-line tot-total"><span>TOTAL</span><span id="t_total">R$ 0,00</span></div></div></div>
     <div class="card mt"><h3 class="sec-title">Condições</h3>
       <div class="grid2"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
         <div class="field"><label>Validade</label><input id="f_val" readonly value="${esc(valTxt)}"><span class="hint muted small">Definida em Configurações → Preferências</span></div></div>
@@ -735,36 +797,44 @@ async function formOrcamento(id, opts) {
   const prioCombo = selectCombo(B.prioridades, doc.prioridade || "Normal", null); main().querySelector("#c_prio").appendChild(prioCombo);
   const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null); main().querySelector("#c_pag").appendChild(pagCombo);
   const { cliCombo, veiCombo } = pickerPessoaVeiculo(main().querySelector("#c_cli"), main().querySelector("#c_vei"), clientes, veiculos, doc.cliente_id, doc.veiculo_id);
+  const dtData = dtPicker(dtLocalVal(doc.data_abertura) || nowLocal()); main().querySelector("#c_data").appendChild(dtData);
   let getDescTipo = () => (doc.desconto_tipo === "percent" ? "percent" : "valor");
+  let getAcrTipo = () => (doc.acrescimo_tipo === "percent" ? "percent" : "valor");
   const recalc = () => {
     const sub = itens.reduce((a, it) => a + (num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)), 0);
     main().querySelector("#t_sub").textContent = money(sub);
-    const desc = descResolvido(sub, getDescTipo());
-    const eq = main().querySelector("#desc_eq"); if (eq) eq.textContent = getDescTipo() === "percent" ? "= " + money(desc) : "";
-    main().querySelector("#t_total").textContent = money(sub - desc + num(val("#f_acr")));
+    const desc = ajusteResolvido(sub, "f_desc", getDescTipo());
+    const acr = ajusteResolvido(sub, "f_acr", getAcrTipo());
+    const de = main().querySelector("#f_desc_eq"); if (de) de.textContent = getDescTipo() === "percent" ? "= " + money(desc) : "";
+    const ae = main().querySelector("#f_acr_eq"); if (ae) ae.textContent = getAcrTipo() === "percent" ? "= " + money(acr) : "";
+    main().querySelector("#t_total").textContent = money(sub - desc + acr);
   };
   const ed = itensEditor(itens, cat, recalc); main().querySelector("#itens-box").appendChild(ed.el);
-  getDescTipo = bindDescLine(recalc, doc.desconto_tipo);
-  const fa = main().querySelector("#f_acr"); bindMoney(fa); fa.oninput = recalc; recalc();
-  const payloadDe = () => ({ id: doc.id, tipo: "orcamento", status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: val("#f_data"),
+  getDescTipo = bindAjusteLine("f_desc", recalc, doc.desconto_tipo);
+  getAcrTipo = bindAjusteLine("f_acr", recalc, doc.acrescimo_tipo); recalc();
+  const payloadDe = () => ({ id: doc.id, tipo: "orcamento", status: statusCombo._value(), prioridade: prioCombo._value(), data_abertura: dtData._value(),
     usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
     cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null,
-    desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")),
+    desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")), acrescimo_tipo: getAcrTipo(),
     forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), validade: valTxt, observacoes: val("#f_obs"),
     itens: itens.map(it => ({ item_catalogo_id: it.item_catalogo_id, descricao: it.descricao, tipo: it.tipo, quantidade: num(it.quantidade), valor_unitario: num(it.valor_unitario), desconto: num(it.desconto) })), lataria: [] });
   main().querySelector("#back").onclick = () => setView("orcamentos");
   main().querySelector("#cancel").onclick = () => setView("orcamentos");
   const verOs = main().querySelector("#ver_os");
   if (verOs) verOs.onclick = () => openOS(doc.os_vinculada_id);
-  const exigePessoa = () => { if (!cliCombo._value()) { toast("Selecione a pessoa do orçamento.", "err"); return false; } return true; };
+  const validaOrc = () => {
+    if (!cliCombo._value()) { toast("Selecione a pessoa do orçamento.", "err"); return false; }
+    if (!itens.length) { toast("Adicione ao menos um produto/serviço ao orçamento.", "err"); return false; }
+    return true;
+  };
   main().querySelector("#salvar").onclick = async () => {
-    if (!exigePessoa()) return;
+    if (!validaOrc()) return;
     const saved = await api("save_documento", payloadDe()); toast("Orçamento salvo: " + saved.numero, "ok");
     if (opts.onSaved) opts.onSaved(saved); else setView("orcamentos");
   };
   // efetivar do form: salva as edições pendentes primeiro, depois efetiva o orçamento salvo
   const ef = main().querySelector("#efetivar");
-  if (ef) ef.onclick = async () => { if (!exigePessoa()) return; const saved = await api("save_documento", payloadDe()); efetivarOrcamento(saved); };
+  if (ef) ef.onclick = async () => { if (!validaOrc()) return; const saved = await api("save_documento", payloadDe()); efetivarOrcamento(saved); };
 }
 
 /* efetivar um orçamento -> cria a O.S. (Aberta) com os itens carregados para a entrada.
@@ -774,7 +844,7 @@ async function efetivarOrcamento(orc) {
   const full = orc.itens ? orc : await api("get_documento", orc.id);
   openOS(null, { prefill: {
     cliente_id: full.cliente_id, veiculo_id: full.veiculo_id, origem_orcamento_id: full.id,
-    desconto_geral: full.desconto_geral, desconto_tipo: full.desconto_tipo, acrescimo: full.acrescimo, forma_pagamento: full.forma_pagamento,
+    desconto_geral: full.desconto_geral, desconto_tipo: full.desconto_tipo, acrescimo: full.acrescimo, acrescimo_tipo: full.acrescimo_tipo, forma_pagamento: full.forma_pagamento,
     observacoes: full.observacoes, itens: itensDoOrcamento(full),
   }, fromOrcamento: full.numero });
 }
@@ -786,7 +856,7 @@ async function openOS(id, opts) {
   let [clientes, veiculos, cat] = await Promise.all([api("list_clientes"), api("list_veiculos"), api("list_itens")]);
   const doc = id ? await api("get_documento", id) : Object.assign({
     tipo: "os", status: opts.faturada ? "Faturada" : "Aberta", prioridade: "Normal", data_abertura: nowLocal(), previsao: "", ordem_compra: "",
-    cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, itens: [], lataria: [],
+    cliente_id: "", veiculo_id: "", km_entrada: "", desconto_geral: 0, desconto_tipo: "valor", acrescimo: 0, acrescimo_tipo: "valor", itens: [], lataria: [],
     forma_pagamento: "", observacoes: "", estado_geral: "", nivel_combustivel: "", obs_entrada: "", ocorrencia: "",
     parecer_mecanico: "", mecanico: "", faturado_em: "", origem_orcamento_id: null,
     item_chave_principal: 0, item_chave_reserva: 0, item_documento: 0, item_manual: 0,
@@ -819,13 +889,13 @@ async function openOS(id, opts) {
 
     <div class="card mt"><div class="between"><h3 class="sec-title" style="margin:0">Dados da Entrada</h3>
       ${(!id && !opts.faturada) || (id && verItens && !isFat) ? `<button class="btn btn-sm" id="importar">${ic("repeat", 15)}<span>Importar orçamento</span></button>` : ""}</div>
-      <div class="grid3 mt"><div class="field"><label>Data de Abertura</label><input type="datetime-local" id="f_data" value="${esc(dtLocalVal(doc.data_abertura) || nowLocal())}"></div>
+      <div class="grid3 mt"><div class="field"><label>Data de Abertura</label><div id="c_data"></div></div>
         <div class="field"><label>Prioridade</label><div id="c_prio"></div></div>
         <div class="field"><label>Responsável</label><input value="${esc(respNome)}" readonly></div></div>
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
       <div class="grid3"><div class="field"><label>KM Entrada</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="Ex: 45000"></div>
-        <div class="field"><label>Previsão de Entrega</label><input type="datetime-local" id="f_prev" value="${esc(dtLocalVal(doc.previsao))}"><span class="hint muted small">Opcional — sinaliza atraso</span></div>
+        <div class="field"><label>Previsão de Entrega</label><div id="c_prev"></div><span class="hint muted small">Opcional — sinaliza atraso</span></div>
         <div class="field"><label>Nº Ordem de Compra${ocExige ? " *" : ""}</label><input id="f_oc" value="${esc(doc.ordem_compra || "")}" placeholder="${ocExige ? "Exigida no faturamento" : "Opcional"}"></div></div></div>
 
     <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Checklist de Entrada</h3>${ic("chevron", 18)}</div>
@@ -844,11 +914,11 @@ async function openOS(id, opts) {
       <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div></div></div>
 
     <div class="card mt" id="card-itens" style="${verItens ? "" : "display:none"}"><h3 class="sec-title">Serviços e Produtos</h3><div id="itens-box"></div>
-      <hr class="sep">
-      <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
-      ${descLineHtml(doc)}
-      <div class="tot-line"><span class="muted">Acréscimo</span><input id="f_acr" class="money-in" style="width:150px;text-align:right" value="${doc.acrescimo || 0}"></div>
-      <div class="tot-line"><span class="big">TOTAL</span><span class="big" id="t_total">R$ 0,00</span></div></div>
+      <div class="totais">
+        <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
+        ${ajusteLineHtml("Desconto", "f_desc", doc.desconto_geral, doc.desconto_tipo)}
+        ${ajusteLineHtml("Acréscimo", "f_acr", doc.acrescimo, doc.acrescimo_tipo)}
+        <div class="tot-line tot-total"><span>TOTAL</span><span id="t_total">R$ 0,00</span></div></div></div>
 
     <div class="card mt" id="card-parecer" style="${verParecer ? "" : "display:none"}"><h3 class="sec-title">Parecer Técnico</h3>
       <div class="field"><label>Mecânico responsável</label><input id="f_mec" value="${esc(doc.mecanico || "")}" placeholder="Nome do mecânico (opcional)"></div>
@@ -856,7 +926,7 @@ async function openOS(id, opts) {
 
     <div class="card mt" id="card-fatur" style="${verFatur ? "" : "display:none"}"><h3 class="sec-title">Faturamento</h3>
       <div class="grid3"><div class="field"><label>Forma de Pagamento</label><div id="c_pag"></div></div>
-        <div class="field"><label>Data de Faturamento</label><input type="datetime-local" id="f_fatdata" value="${esc(dtLocalVal(doc.faturado_em) || dtLocalVal(doc.data_abertura) || nowLocal())}"></div></div>
+        <div class="field"><label>Data de Faturamento</label><div id="c_fat"></div></div></div>
       <div class="field"><label>Observações</label><textarea id="f_obs">${esc(doc.observacoes || "")}</textarea></div></div>
 
     <div class="between mt" style="margin-bottom:30px"><button class="btn" id="cancelar">${ic("back", 15)}<span>Voltar</span></button>
@@ -866,6 +936,9 @@ async function openOS(id, opts) {
   const estadoCombo = selectCombo(["—"].concat(B.estado_geral), doc.estado_geral || "—", null); main().querySelector("#c_estado").appendChild(estadoCombo);
   const pagCombo = selectCombo(["—"].concat(B.formas_pagamento), doc.forma_pagamento || "—", null); main().querySelector("#c_pag").appendChild(pagCombo);
   const { cliCombo, veiCombo } = pickerPessoaVeiculo(main().querySelector("#c_cli"), main().querySelector("#c_vei"), clientes, veiculos, doc.cliente_id, doc.veiculo_id);
+  const dtData = dtPicker(dtLocalVal(doc.data_abertura) || nowLocal()); main().querySelector("#c_data").appendChild(dtData);
+  const dtPrev = dtPicker(dtLocalVal(doc.previsao), { placeholder: "Sem previsão" }); main().querySelector("#c_prev").appendChild(dtPrev);
+  const dtFat = dtPicker(dtLocalVal(doc.faturado_em) || dtLocalVal(doc.data_abertura) || nowLocal()); main().querySelector("#c_fat").appendChild(dtFat);
 
   // checklist repaginado
   const latBox = main().querySelector("#lataria");
@@ -888,30 +961,33 @@ async function openOS(id, opts) {
 
   // itens (serviços)
   let getDescTipo = () => (doc.desconto_tipo === "percent" ? "percent" : "valor");
+  let getAcrTipo = () => (doc.acrescimo_tipo === "percent" ? "percent" : "valor");
   const recalc = () => {
     const sub = itens.reduce((a, it) => a + (num(it.quantidade) * num(it.valor_unitario) - num(it.desconto)), 0);
     const ts = main().querySelector("#t_sub"); if (!ts) return;
     ts.textContent = money(sub);
-    const desc = descResolvido(sub, getDescTipo());
-    const eq = main().querySelector("#desc_eq"); if (eq) eq.textContent = getDescTipo() === "percent" ? "= " + money(desc) : "";
-    main().querySelector("#t_total").textContent = money(sub - desc + num(val("#f_acr")));
+    const desc = ajusteResolvido(sub, "f_desc", getDescTipo());
+    const acr = ajusteResolvido(sub, "f_acr", getAcrTipo());
+    const de = main().querySelector("#f_desc_eq"); if (de) de.textContent = getDescTipo() === "percent" ? "= " + money(desc) : "";
+    const ae = main().querySelector("#f_acr_eq"); if (ae) ae.textContent = getAcrTipo() === "percent" ? "= " + money(acr) : "";
+    main().querySelector("#t_total").textContent = money(sub - desc + acr);
   };
   const ed = itensEditor(itens, cat, recalc); main().querySelector("#itens-box").appendChild(ed.el);
-  getDescTipo = bindDescLine(recalc, doc.desconto_tipo);
-  const fa = main().querySelector("#f_acr"); bindMoney(fa); fa.oninput = recalc; recalc();
+  getDescTipo = bindAjusteLine("f_desc", recalc, doc.desconto_tipo);
+  getAcrTipo = bindAjusteLine("f_acr", recalc, doc.acrescimo_tipo); recalc();
 
   // payload do estado atual do formulário (com status escolhido)
   const payloadDe = (status) => ({
-    id: doc.id, tipo: "os", status, prioridade: prioCombo._value(), data_abertura: val("#f_data"),
+    id: doc.id, tipo: "os", status, prioridade: prioCombo._value(), data_abertura: dtData._value(),
     usuario_id: doc.usuario_id || (CURRENT_USER && CURRENT_USER.id) || null,
     cliente_id: cliCombo._value() || null, veiculo_id: veiCombo._value() || null, km_entrada: val("#f_km"),
-    previsao: val("#f_prev"), ordem_compra: val("#f_oc"),
-    desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")),
+    previsao: dtPrev._value(), ordem_compra: val("#f_oc"),
+    desconto_geral: num(val("#f_desc")), desconto_tipo: getDescTipo(), acrescimo: num(val("#f_acr")), acrescimo_tipo: getAcrTipo(),
     forma_pagamento: pagCombo._value() === "—" ? "" : pagCombo._value(), prazo_execucao: doc.prazo_execucao || "", validade: doc.validade || "",
     observacoes: val("#f_obs"), estado_geral: estadoCombo._value() === "—" ? "" : estadoCombo._value(), nivel_combustivel: nivelSel,
     obs_entrada: val("#f_obsent"), ocorrencia: val("#f_ocor"), mecanico: val("#f_mec"), parecer_mecanico: val("#f_parecer"),
     origem_orcamento_id: doc.origem_orcamento_id || null,
-    faturado_em: status === "Faturada" ? (val("#f_fatdata") || doc.data_abertura) : "",
+    faturado_em: status === "Faturada" ? (dtFat._value() || doc.data_abertura) : "",
     item_chave_principal: main().querySelector("#c_chave").checked ? 1 : 0,
     item_chave_reserva: main().querySelector("#c_reserva").checked ? 1 : 0,
     item_documento: main().querySelector("#c_doc").checked ? 1 : 0,
@@ -1003,10 +1079,16 @@ async function printPreview(id) {
   const r = await api("print_documento", id);
   const m = h(`<div class="modal" style="width:880px"><button class="close">×</button><h3>${esc(r.numero)}</h3>
     <iframe style="width:100%;height:64vh;border:1px solid #e5e7eb;border-radius:8px"></iframe>
-    <div class="between mt"><button class="btn" id="fechar">Fechar</button><button class="btn btn-primary" id="imp">${ic("printer", 16)}<span>Imprimir / Salvar PDF</span></button></div></div>`);
+    <div class="between mt"><button class="btn" id="fechar">Fechar</button>
+      <div class="row"><button class="btn" id="xls">${ic("sheet", 16)}<span>Exportar Excel</span></button><button class="btn btn-primary" id="imp">${ic("printer", 16)}<span>Imprimir / Salvar PDF</span></button></div></div></div>`);
   const bg = openModal(m); m.querySelector("iframe").srcdoc = r.html;
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#fechar").onclick = () => bg.remove();
   m.querySelector("#imp").onclick = () => { const fr = m.querySelector("iframe"); fr.contentWindow.focus(); fr.contentWindow.print(); };
+  m.querySelector("#xls").onclick = () => exportarExcel(id);
+}
+async function exportarExcel(id) {
+  const r = await api("export_excel", id);
+  if (r && r.arquivo) toast("Exportado: " + r.arquivo, "ok");
 }
 
 /* ----------------------------------------------------------------- pessoas (clientes) */
@@ -1424,7 +1506,7 @@ async function viewConfiguracoes(tab) {
 const AUDIT_ACOES = {
   criar: { lbl: "Criação", cls: "b-green" }, editar: { lbl: "Edição", cls: "b-os" },
   excluir: { lbl: "Exclusão", cls: "b-late" }, status: { lbl: "Status", cls: "b-aberta" },
-  parametro: { lbl: "Parâmetro", cls: "b-orc" }, login: { lbl: "Login", cls: "b-gray" },
+  parametro: { lbl: "Parâmetro", cls: "b-orc" }, exportar: { lbl: "Exportação", cls: "b-os" }, login: { lbl: "Login", cls: "b-gray" },
   logout: { lbl: "Logout", cls: "b-gray" }, login_falha: { lbl: "Login falho", cls: "b-late" },
   backup: { lbl: "Backup", cls: "b-gray" }, restaurar: { lbl: "Restauração", cls: "b-late" },
 };

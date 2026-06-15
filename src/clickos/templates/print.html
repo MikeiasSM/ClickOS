@@ -194,8 +194,8 @@
     </tr>
     <tr>
       <td></td>
-      <td class="lbl right">Desconto{% if doc.desconto_tipo == 'percent' and doc.desconto_geral %} ({{ doc.desconto_geral }}%){% endif %} / Acréscimo</td>
-      <td class="right b">- {{ (doc.desconto_valor if doc.desconto_valor is defined else doc.desconto_geral)|brl }} / + {{ doc.acrescimo|brl }}</td>
+      <td class="lbl right">Desconto{% if doc.desconto_tipo == 'percent' and doc.desconto_geral %} ({{ doc.desconto_geral }}%){% endif %} / Acréscimo{% if doc.acrescimo_tipo == 'percent' and doc.acrescimo %} ({{ doc.acrescimo }}%){% endif %}</td>
+      <td class="right b">- {{ (doc.desconto_valor if doc.desconto_valor is defined else doc.desconto_geral)|brl }} / + {{ (doc.acrescimo_valor if doc.acrescimo_valor is defined else doc.acrescimo)|brl }}</td>
     </tr>
     <tr>
       <td></td>

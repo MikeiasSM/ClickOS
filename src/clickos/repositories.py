@@ -197,7 +197,8 @@ def _anota_situacao(d, prefs, agora):
     """Anota campos derivados no documento (não persistidos):
     desconto_valor (R$ resolvido), expirado (orçamento), atrasado (O.S.) e situacao (status p/ exibir)."""
     sub, tot = services._num(d.get("subtotal")), services._num(d.get("total"))
-    acr = services._num(d.get("acrescimo"))
+    acr = services.valor_resolvido(sub, d.get("acrescimo"), d.get("acrescimo_tipo"))
+    d["acrescimo_valor"] = acr
     d["desconto_valor"] = round(sub + acr - tot, 2)  # deriva do que já foi gravado
     d["expirado"] = False
     d["atrasado"] = False
@@ -223,7 +224,7 @@ def _anota_situacao(d, prefs, agora):
 # --------------------------------------------------------------------------- documentos
 class _Documentos:
     HEAD = ["tipo", "status", "prioridade", "data_abertura", "previsao", "cliente_id", "veiculo_id",
-            "km_entrada", "desconto_geral", "desconto_tipo", "acrescimo", "forma_pagamento",
+            "km_entrada", "desconto_geral", "desconto_tipo", "acrescimo", "acrescimo_tipo", "forma_pagamento",
             "prazo_execucao", "validade", "observacoes", "estado_geral", "nivel_combustivel",
             "obs_entrada", "item_chave_principal", "item_chave_reserva", "item_documento", "item_manual",
             "origem_orcamento_id", "usuario_id",
@@ -238,12 +239,15 @@ class _Documentos:
         data.setdefault("desconto_geral", 0)
         data.setdefault("desconto_tipo", "valor")
         data.setdefault("acrescimo", 0)
+        data.setdefault("acrescimo_tipo", "valor")
         if not data.get("cliente_id"):
             raise ValueError("Selecione a pessoa antes de salvar o documento.")
-        numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))
         itens = data.get("itens") or []
+        if data["tipo"] == "orcamento" and not itens:
+            raise ValueError("Adicione ao menos um produto/serviço ao orçamento.")
+        numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))
         tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
-                                      data.get("desconto_tipo"))
+                                      data.get("desconto_tipo"), data.get("acrescimo_tipo"))
         cols = ["numero"] + self.HEAD + ["subtotal", "total", "criado_em", "atualizado_em"]
         vals = [numero] + [data.get(f) for f in self.HEAD] + [tot["subtotal"], tot["total"], now, now]
         cur = con.execute(f"INSERT INTO documentos({','.join(cols)}) VALUES({','.join('?'*len(cols))})", vals)
@@ -260,6 +264,8 @@ class _Documentos:
         itens = data.get("itens") or []
         if data.get("status") == "Faturada" and not itens:
             raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
+        if data.get("tipo") == "orcamento" and not itens:
+            raise ValueError("Adicione ao menos um produto/serviço ao orçamento.")
         novo_status = data.get("status")
         if novo_status:
             row_t = con.execute("SELECT tipo FROM documentos WHERE id=?", (did,)).fetchone()
@@ -267,12 +273,13 @@ class _Documentos:
             self._guarda_oc_faturamento(con, did, novo_status, data)
         # Campos financeiros ausentes no payload herdam o que já está gravado: assim o total nunca é
         # recalculado com desconto/acréscimo zerados nem com o tipo de desconto errado (R$ vs %).
-        atual = con.execute("SELECT desconto_geral, desconto_tipo, acrescimo FROM documentos WHERE id=?",
+        atual = con.execute("SELECT desconto_geral, desconto_tipo, acrescimo, acrescimo_tipo FROM documentos WHERE id=?",
                             (did,)).fetchone()
         dg = data["desconto_geral"] if "desconto_geral" in data else (atual["desconto_geral"] if atual else 0)
         dt = data["desconto_tipo"] if "desconto_tipo" in data else (atual["desconto_tipo"] if atual else "valor")
         ac = data["acrescimo"] if "acrescimo" in data else (atual["acrescimo"] if atual else 0)
-        tot = services.compute_totals(itens, dg, ac, dt)
+        at = data["acrescimo_tipo"] if "acrescimo_tipo" in data else (atual["acrescimo_tipo"] if atual else "valor")
+        tot = services.compute_totals(itens, dg, ac, dt, at)
         # só grava as colunas presentes no payload (preserva as demais — evita zerar campos não enviados);
         # os campos calculados entram sempre (a lista nunca fica vazia → sem vírgula solta no SET).
         campos = [f for f in self.HEAD if f in data]

@@ -74,7 +74,8 @@ def test_status_padrao_por_tipo_e_prioridade(tmp_path):
     con = db.connect(tmp_path / "t.db")
     c = _cliente(con)  # documento exige pessoa
     orc = repo.documentos.create(con, {"tipo": "orcamento", "data_abertura": "2026-06-13",
-                                       "cliente_id": c["id"], "itens": []})
+                                       "cliente_id": c["id"],  # orçamento exige produto
+                                       "itens": [{"descricao": "Serviço", "quantidade": 1, "valor_unitario": 100, "desconto": 0}]})
     os_doc = repo.documentos.create(con, {"tipo": "os", "data_abertura": "2026-06-13",
                                           "cliente_id": c["id"], "prioridade": "Urgente", "itens": []})
     assert orc["status"] == "Aberto"          # orçamento

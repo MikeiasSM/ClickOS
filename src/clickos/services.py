@@ -85,23 +85,28 @@ def line_liquido(qtd, bruto, desconto) -> float:
     return round(_num(qtd) * _num(bruto) - _num(desconto), 2)
 
 
-def desconto_resolvido(subtotal, desconto_geral, desconto_tipo="valor") -> float:
-    """Converte o desconto geral em R$. Quando 'percent', aplica o percentual sobre o subtotal."""
-    if (desconto_tipo or "valor") == "percent":
-        return round(_num(subtotal) * _num(desconto_geral) / 100.0, 2)
-    return round(_num(desconto_geral), 2)
+def valor_resolvido(subtotal, valor, tipo="valor") -> float:
+    """Converte um ajuste (desconto ou acréscimo) em R$. Quando 'percent', aplica o % sobre o subtotal."""
+    if (tipo or "valor") == "percent":
+        return round(_num(subtotal) * _num(valor) / 100.0, 2)
+    return round(_num(valor), 2)
 
 
-def compute_totals(itens, desconto_geral=0, acrescimo=0, desconto_tipo="valor") -> dict:
-    """Subtotal (soma dos líquidos) e total (subtotal - desconto geral + acréscimo).
-    O desconto geral pode ser em R$ ('valor') ou percentual ('percent')."""
+# compat: nome antigo mantido
+desconto_resolvido = valor_resolvido
+
+
+def compute_totals(itens, desconto_geral=0, acrescimo=0, desconto_tipo="valor", acrescimo_tipo="valor") -> dict:
+    """Subtotal (soma dos líquidos) e total (subtotal - desconto + acréscimo).
+    Desconto e acréscimo podem ser em R$ ('valor') ou percentual ('percent') sobre o subtotal."""
     subtotal = round(
         sum(line_liquido(i.get("quantidade"), i.get("valor_unitario"), i.get("desconto")) for i in itens),
         2,
     )
-    desc = desconto_resolvido(subtotal, desconto_geral, desconto_tipo)
-    total = round(subtotal - desc + _num(acrescimo), 2)
-    return {"subtotal": subtotal, "total": total, "desconto_valor": desc}
+    desc = valor_resolvido(subtotal, desconto_geral, desconto_tipo)
+    acr = valor_resolvido(subtotal, acrescimo, acrescimo_tipo)
+    total = round(subtotal - desc + acr, 2)
+    return {"subtotal": subtotal, "total": total, "desconto_valor": desc, "acrescimo_valor": acr}
 
 
 # ----------------------------------------------------------------- datas / durações (preferências)
@@ -161,6 +166,7 @@ def convert_to_os(con, orcamento_id: int, stamp: str | None = None) -> dict:
         "desconto_geral": orc.get("desconto_geral", 0),
         "desconto_tipo": orc.get("desconto_tipo", "valor"),
         "acrescimo": orc.get("acrescimo", 0),
+        "acrescimo_tipo": orc.get("acrescimo_tipo", "valor"),
         "forma_pagamento": orc.get("forma_pagamento"),
         "prazo_execucao": orc.get("prazo_execucao"),
         "validade": orc.get("validade"),
