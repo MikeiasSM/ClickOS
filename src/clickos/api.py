@@ -184,7 +184,10 @@ class Api:
         total = one("SELECT COUNT(*) FROM documentos")
         orcamentos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento'")
         os_count = one("SELECT COUNT(*) FROM documentos WHERE tipo='os'")
-        abertas = one("SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status='Aberta'")
+        # "OS em aberto" = O.S. ainda no fluxo (Aberta/Em Execução/Concluída), batendo com o donut do pipeline
+        _ph = ",".join("?" * len(dbmod.KANBAN_OS_STATUS))
+        abertas = one(f"SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status IN ({_ph})",
+                      tuple(dbmod.KANBAN_OS_STATUS))
         orc_abertos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status='Aberto'")
         clientes = one("SELECT COUNT(*) FROM clientes")
         veiculos = one("SELECT COUNT(*) FROM veiculos")
