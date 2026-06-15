@@ -898,8 +898,8 @@ async function openOS(id, opts) {
       <div class="grid2"><div class="field"><label>Pessoa</label><div id="c_cli"></div></div>
         <div class="field"><label>Veículo</label><div id="c_vei"></div></div></div>
       <div class="grid3"><div class="field"><label>KM Entrada${kmExige ? " *" : ""}</label><input id="f_km" value="${esc(doc.km_entrada || "")}" placeholder="${kmExige ? "Obrigatório" : "Ex: 45000"}"></div>
-        <div class="field"><label>Previsão de Entrega</label><div id="c_prev"></div><span class="hint muted small">Opcional — sinaliza atraso</span></div>
-        <div class="field"><label>Nº Ordem de Compra${ocExige ? " *" : ""}</label><input id="f_oc" value="${esc(doc.ordem_compra || "")}" placeholder="${ocExige ? "Exigida no faturamento" : "Opcional"}"></div></div></div>
+        <div class="field"><label>Previsão de Entrega</label><div id="c_prev"></div></div>
+        <div class="field"><label>Nº Ordem de Compra${ocExige ? " *" : ""}</label><input id="f_oc" value="${esc(doc.ordem_compra || "")}"></div></div></div>
 
     <div class="card mt acc${colapsado ? " collapsed" : ""}" data-acc><div class="acc-head"><h3 class="sec-title" style="margin:0">Checklist de Entrada</h3>${ic("chevron", 18)}</div>
       <div class="acc-body"><div class="muted small" style="margin:8px 0">Marque o estado de cada item da lataria.</div>
@@ -1002,10 +1002,10 @@ async function openOS(id, opts) {
   const salvar = async (status, msg) => {
     if (!validaPessoa()) return null;
     if (kmExige && !val("#f_km")) {
-      toast("Informe o KM de entrada do veículo (exigido nas preferências).", "err"); return null;
+      toast("Informe o KM de entrada do veículo.", "err"); return null;
     }
     if (status === "Faturada" && ocExige && !val("#f_oc")) {
-      toast("Informe o Nº da Ordem de Compra para faturar (exigido nas preferências).", "err"); return null;
+      toast("Informe o Nº da Ordem de Compra para faturar.", "err"); return null;
     }
     const saved = await api("save_documento", payloadDe(status));
     // só agora (O.S. realmente criada) o orçamento de origem é marcado como Aprovado
@@ -1595,28 +1595,23 @@ async function renderPreferencias(container) {
   const prefs = await api("get_preferencias");
   const unidades = B.unidades_tempo || ["horas", "dias", "semanas", "meses"];
   const uOpts = (sel) => unidades.map(u => `<option value="${u}" ${u === sel ? "selected" : ""}>${u}</option>`).join("");
+  const sw = (id, on) => `<label class="switch"><input type="checkbox" id="${id}" ${String(on) === "1" ? "checked" : ""}><span class="sl"></span></label>`;
+  const row = (titulo, desc, ctrl) => `<div class="set-row"><div class="set-info"><div class="t">${titulo}</div><div class="d">${desc}</div></div><div class="set-ctrl">${ctrl}</div></div>`;
+  const sec = (icone, titulo, sub, linhas) => `<div class="card pref-card"><div class="pref-h"><div class="pref-ic">${ic(icone, 18)}</div><div><h3>${titulo}</h3><span>${sub}</span></div></div>${linhas}</div>`;
   container.innerHTML = `
-    <div class="card"><h3 class="sec-title">Orçamentos</h3>
-      <p class="muted" style="margin:0 0 14px">Prazo de validade padrão dos orçamentos. Depois desse prazo, um orçamento em aberto passa a ser exibido como <b>Expirado</b> nas listagens.</p>
-      <div class="pref-row"><label>Validade padrão</label>
-        <input type="number" min="1" id="p_orc_qtd" class="pref-num" value="${esc(prefs.orc_validade_qtd)}">
-        <select id="p_orc_uni" class="pref-sel">${uOpts(prefs.orc_validade_unidade)}</select></div>
-      <div class="pref-preview" id="p_orc_prev"></div></div>
+    ${sec("doc", "Orçamentos", "Validade das propostas comerciais",
+      row("Validade padrão", `Após esse prazo, um orçamento aberto vira <b>Expirado</b>. <span class="pill-prev" id="p_orc_prev"></span>`,
+        `<input type="number" min="1" id="p_orc_qtd" class="set-num" value="${esc(prefs.orc_validade_qtd)}"><select id="p_orc_uni" class="set-sel">${uOpts(prefs.orc_validade_unidade)}</select>`))}
 
-    <div class="card mt"><h3 class="sec-title">Ordens de Serviço</h3>
-      <p class="muted" style="margin:0 0 14px">Tolerância de atraso. Quando a <b>Previsão de Entrega</b> de uma O.S. é ultrapassada por mais que este tempo, ela é sinalizada como <b>Atrasada</b> no quadro e nas listagens.</p>
-      <div class="pref-row"><label>Sinalizar atraso após</label>
-        <input type="number" min="0" id="p_os_qtd" class="pref-num" value="${esc(prefs.os_atraso_qtd)}">
-        <select id="p_os_uni" class="pref-sel">${uOpts(prefs.os_atraso_unidade)}</select>
-        <span class="muted small">além da previsão</span></div>
-      <div class="pref-row" style="margin-top:14px"><label>Ordem de Compra</label>
-        <label class="pref-check"><input type="checkbox" id="p_oc" ${String(prefs.os_exige_oc) === "1" ? "checked" : ""}> Exigir Nº de Ordem de Compra ao faturar a O.S.</label></div>
-      <div class="pref-row"><label>KM do Veículo</label>
-        <label class="pref-check"><input type="checkbox" id="p_km" ${String(prefs.os_exige_km) === "1" ? "checked" : ""}> Exigir KM de entrada ao abrir a O.S.</label></div>
-      <div class="pref-row" style="margin-top:14px"><label>Checklist na impressão</label>
-        <label class="pref-check"><input type="checkbox" id="p_pchk" ${String(prefs.os_print_checklist) === "1" ? "checked" : ""}> Incluir o checklist de entrada na impressão da O.S.</label></div>
-      <div class="pref-row"><label>Termo de garantia</label>
-        <label class="pref-check"><input type="checkbox" id="p_pgar" ${String(prefs.os_print_garantia) === "1" ? "checked" : ""}> Exibir o termo de garantia (Configurações → Empresa) na impressão da O.S.</label></div></div>
+    <div class="mt">${sec("trending", "Ordens de Serviço", "Abertura, faturamento e atraso",
+      row("Tolerância de atraso", "Tempo além da Previsão de Entrega antes de marcar como <b>Atrasada</b>.",
+        `<input type="number" min="0" id="p_os_qtd" class="set-num" value="${esc(prefs.os_atraso_qtd)}"><select id="p_os_uni" class="set-sel">${uOpts(prefs.os_atraso_unidade)}</select>`) +
+      row("Exigir Ordem de Compra", "Obriga informar o Nº de O.C. ao faturar.", sw("p_oc", prefs.os_exige_oc)) +
+      row("Exigir KM de entrada", "Obriga informar o KM ao abrir a O.S.", sw("p_km", prefs.os_exige_km)))}</div>
+
+    <div class="mt">${sec("printer", "Impressão da O.S.", "O que aparece no documento impresso",
+      row("Checklist de entrada", "Inclui a vistoria de entrada (lataria, itens) no layout.", sw("p_pchk", prefs.os_print_checklist)) +
+      row("Termo de garantia", "Usa o termo cadastrado em <b>Empresa</b> no rodapé.", sw("p_pgar", prefs.os_print_garantia)))}</div>
 
     <div class="between mt"><span></span><button class="btn btn-primary" id="p_save">${ic("save", 16)}<span>Salvar preferências</span></button></div>`;
   injectIcons(container);

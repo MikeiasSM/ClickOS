@@ -307,7 +307,7 @@ class Api:
         cliente = repo.clientes.get(self.con, doc["cliente_id"]) if doc.get("cliente_id") else {}
         veiculo = repo.veiculos.get(self.con, doc["veiculo_id"]) if doc.get("veiculo_id") else {}
         empresa = dict(self.con.execute("SELECT * FROM empresa WHERE id=1").fetchone())
-        dados = excel_export.gerar(doc, empresa, cliente, veiculo)
+        dados = excel_export.gerar(doc, empresa, cliente, veiculo, repo.get_preferencias(self.con))
         res = self._win().create_file_dialog(
             webview.SAVE_DIALOG, save_filename=f"{doc['numero']}.xlsx",
             file_types=("Planilha Excel (*.xlsx)", "Todos os arquivos (*.*)"))

@@ -250,7 +250,7 @@ class _Documentos:
             raise ValueError("Adicione ao menos um produto/serviço ao orçamento.")
         if data["tipo"] == "os" and str(get_preferencias(con).get("os_exige_km")) in ("1", "true", "True") \
                 and not str(data.get("km_entrada") or "").strip():
-            raise ValueError("Informe o KM de entrada do veículo (exigido nas preferências).")
+            raise ValueError("Informe o KM de entrada do veículo.")
         numero = services.next_number(con, data["tipo"], _ano(data.get("data_abertura"), _ano(now, 2026)))
         tot = services.compute_totals(itens, data.get("desconto_geral"), data.get("acrescimo"),
                                       data.get("desconto_tipo"), data.get("acrescimo_tipo"))
@@ -348,7 +348,7 @@ class _Documentos:
             row = con.execute("SELECT ordem_compra FROM documentos WHERE id=?", (did,)).fetchone()
             oc = row["ordem_compra"] if row else None
         if not (oc or "").strip():
-            raise ValueError("Informe o Nº da Ordem de Compra para faturar esta O.S. (exigido nas preferências).")
+            raise ValueError("Informe o Nº da Ordem de Compra para faturar esta O.S.")
 
     def set_status(self, con, did, status, stamp=None):
         now = _now(stamp)

@@ -47,10 +47,11 @@ def _dt(s) -> str:
     return s
 
 
-def gerar(doc, empresa, cliente, veiculo) -> bytes:
+def gerar(doc, empresa, cliente, veiculo, prefs=None) -> bytes:
     empresa = empresa or {}
     cliente = cliente or {}
     veiculo = veiculo or {}
+    prefs = prefs or {}
     wb = Workbook()
     ws = wb.active
     ws.title = "Orcamento" if doc.get("tipo") == "orcamento" else "OrdemServico"
@@ -143,19 +144,74 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
 
     # ---- Dados da pessoa ----
     secao("DADOS DA PESSOA")
-    campo("Nome", cliente.get("nome") or doc.get("cliente_nome"), "CPF/CNPJ", cliente.get("cpf_cnpj"))
-    campo("Telefone", cliente.get("telefone"), "WhatsApp", cliente.get("whatsapp"))
+    campo("Razão Social / Nome", cliente.get("nome") or doc.get("cliente_nome"), "CPF / CNPJ", cliente.get("cpf_cnpj"))
+    campo("Nome Fant. / Apelido", cliente.get("apelido"), "RG / IE", cliente.get("rg_ie"))
     endereco = cliente.get("endereco") or ""
+    if cliente.get("numero"):
+        endereco += f", {cliente['numero']}"
+    if cliente.get("bairro"):
+        endereco += f" - {cliente['bairro']}"
     if cliente.get("cidade"):
         endereco += f" - {cliente['cidade']}/{cliente.get('uf') or ''}"
+    if cliente.get("cep"):
+        endereco += f" - CEP: {cliente['cep']}"
     campo("Endereço", endereco, full=True)
+    wpp_email = cliente.get("whatsapp") or ""
+    if cliente.get("email"):
+        wpp_email += (" · " if wpp_email else "") + cliente["email"]
+    campo("Telefone", cliente.get("telefone"), "WhatsApp / E-mail", wpp_email)
 
     # ---- Dados do veículo ----
     secao("DADOS DO VEÍCULO")
     campo("Placa", veiculo.get("placa") or doc.get("veiculo_placa"),
-          "Marca/Mod.", f"{veiculo.get('marca') or ''} {veiculo.get('modelo') or ''}".strip())
-    campo("Cor", veiculo.get("cor"), "Combustível", veiculo.get("combustivel"))
-    campo("KM", doc.get("km_entrada"), "Renavam", veiculo.get("renavam"))
+          "Marca / Modelo", f"{veiculo.get('marca') or ''} {veiculo.get('modelo') or ''}".strip())
+    ano = veiculo.get("ano_fab") or ""
+    if veiculo.get("ano_modelo"):
+        ano += f"/{veiculo['ano_modelo']}"
+    campo("Versão", veiculo.get("versao"), "Ano (Fab./Mod.)", ano)
+    chassi = veiculo.get("chassi") or ""
+    if veiculo.get("renavam"):
+        chassi += (" · " if chassi else "") + veiculo["renavam"]
+    campo("Cor", veiculo.get("cor"), "Chassi / Renavam", chassi)
+    campo("Combustível", veiculo.get("combustivel"), "Quilometragem", doc.get("km_entrada"))
+
+    # ---- Checklist de entrada (somente O.S. e se o parâmetro estiver ligado) ----
+    if doc.get("tipo") == "os" and str(prefs.get("os_print_checklist", "1")) == "1":
+        secao("CHECKLIST DE ENTRADA DO VEÍCULO")
+        lat = doc.get("lataria") or []
+        metade = (len(lat) + 1) // 2
+        rh = row[0]
+        for col, txt in (("A", "#"), ("B", "Peça"), ("C", "Estado"), ("D", "#"), ("E", "Peça")):
+            ws[f"{col}{rh}"].value, ws[f"{col}{rh}"].font, ws[f"{col}{rh}"].fill, ws[f"{col}{rh}"].alignment = txt, _BOLD, _LIGHT, _C
+        merge(rh, "F", "G")
+        ws[f"F{rh}"].value, ws[f"F{rh}"].font, ws[f"F{rh}"].fill, ws[f"F{rh}"].alignment = "Estado", _BOLD, _LIGHT, _C
+        box(rh, rh)
+        row[0] += 1
+        for i in range(metade):
+            e = lat[i] if i < len(lat) else {}
+            d = lat[metade + i] if (metade + i) < len(lat) else None
+            r = row[0]
+            ws[f"A{r}"].value, ws[f"A{r}"].alignment = i + 1, _C
+            ws[f"B{r}"].value, ws[f"B{r}"].alignment = (e.get("peca") or ""), _L
+            ws[f"C{r}"].value, ws[f"C{r}"].alignment = (e.get("estado") or "—"), _C
+            if d is not None:
+                ws[f"D{r}"].value, ws[f"D{r}"].alignment = metade + i + 1, _C
+                ws[f"E{r}"].value, ws[f"E{r}"].alignment = (d.get("peca") or ""), _L
+                merge(r, "F", "G")
+                ws[f"F{r}"].value, ws[f"F{r}"].alignment = (d.get("estado") or "—"), _C
+            else:
+                merge(r, "F", "G")
+            box(r, r)
+            row[0] += 1
+        # estado geral + combustível + itens entregues
+        campo("Estado Geral", doc.get("estado_geral"), "Combustível (nível)", doc.get("nivel_combustivel"))
+        entregues = [n for n, k in (("Chave Principal", "item_chave_principal"), ("Chave Reserva", "item_chave_reserva"),
+                                    ("Documento", "item_documento"), ("Manual", "item_manual")) if doc.get(k)]
+        campo("Itens Entregues", ", ".join(entregues) or "—", full=True)
+        if doc.get("ocorrencia"):
+            campo("Ocorrência", doc.get("ocorrencia"), full=True)
+        if doc.get("obs_entrada"):
+            campo("Obs. de Entrada", doc.get("obs_entrada"), full=True)
 
     # ---- Itens ----
     secao("SERVIÇOS / PRODUTOS")
@@ -221,6 +277,16 @@ def gerar(doc, empresa, cliente, veiculo) -> bytes:
         merge(r, "A", "G")
         ws[f"A{r}"].value, ws[f"A{r}"].alignment = (doc.get("parecer_mecanico") or ""), _L
         ws.row_dimensions[r].height = 38
+        box(r, r)
+        row[0] += 1
+
+    # ---- Termo de garantia (somente O.S. e se o parâmetro estiver ligado) ----
+    if doc.get("tipo") == "os" and str(prefs.get("os_print_garantia", "0")) == "1" and empresa.get("termo_garantia"):
+        secao("TERMO DE GARANTIA")
+        r = row[0]
+        merge(r, "A", "G")
+        ws[f"A{r}"].value, ws[f"A{r}"].alignment = empresa.get("termo_garantia"), _L
+        ws.row_dimensions[r].height = 46
         box(r, r)
         row[0] += 1
 
