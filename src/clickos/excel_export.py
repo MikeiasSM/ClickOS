@@ -9,6 +9,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from . import markdown_min
+
 _THIN = Side(style="thin", color="000000")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 _GRAY = PatternFill("solid", fgColor="D9D9D9")
@@ -285,7 +287,7 @@ def gerar(doc, empresa, cliente, veiculo, prefs=None) -> bytes:
         secao("TERMO DE GARANTIA")
         r = row[0]
         merge(r, "A", "G")
-        ws[f"A{r}"].value, ws[f"A{r}"].alignment = empresa.get("termo_garantia"), _L
+        ws[f"A{r}"].value, ws[f"A{r}"].alignment = markdown_min.to_text(empresa.get("termo_garantia")), _L
         ws.row_dimensions[r].height = 46
         box(r, r)
         row[0] += 1

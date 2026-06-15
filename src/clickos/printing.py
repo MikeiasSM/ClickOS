@@ -4,6 +4,7 @@ import base64
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import db as dbmod
+from . import markdown_min
 from . import paths
 
 _env = None
@@ -45,8 +46,10 @@ def logo_data_uri(empresa) -> str:
 def render_documento(doc, empresa, cliente=None, veiculo=None, prefs=None, gerado_em="") -> str:
     """Retorna o HTML A4 do documento pronto para impressão."""
     tmpl = _environment().get_template("print.html")
+    termo = empresa.get("termo_garantia") if isinstance(empresa, dict) else None
     return tmpl.render(
         doc=doc, empresa=empresa, cliente=cliente or {}, veiculo=veiculo or {}, prefs=prefs or {},
+        termo_html=markdown_min.to_html(termo),
         logo_uri=logo_data_uri(empresa), pecas=dbmod.LISTA_PECAS,
         niveis=dbmod.NIVEIS_COMBUSTIVEL, gerado_em=gerado_em,
     )
@@ -55,7 +58,9 @@ def render_documento(doc, empresa, cliente=None, veiculo=None, prefs=None, gerad
 def render_recebimento(doc, empresa, cliente=None, veiculo=None, prefs=None, gerado_em="") -> str:
     """Comprovante de recebimento do veículo (prova de custódia, gerado na abertura da O.S.)."""
     tmpl = _environment().get_template("recebimento.html")
+    termo = empresa.get("termo_garantia") if isinstance(empresa, dict) else None
     return tmpl.render(
         doc=doc, empresa=empresa, cliente=cliente or {}, veiculo=veiculo or {}, prefs=prefs or {},
+        termo_texto=markdown_min.to_text(termo),
         logo_uri=logo_data_uri(empresa), niveis=dbmod.NIVEIS_COMBUSTIVEL, gerado_em=gerado_em,
     )

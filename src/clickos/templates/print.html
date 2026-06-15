@@ -45,7 +45,14 @@
   .line { border-top: 1px solid #000; padding-top: 2px; }
   .foot { text-align: center; font-size: 8px; color: #555; margin-top: 6px; }
   .termo { font-size: 8px; text-align: justify; color: #222; line-height: 1.35; border: 1px solid #000;
-           border-top: 0; padding: 4px 6px; white-space: pre-line; }
+           border-top: 0; padding: 4px 8px; }
+  .termo p { margin: 0 0 3px; }
+  .termo h1, .termo h2, .termo h3, .termo h4, .termo h5, .termo h6 { font-size: 9px; margin: 3px 0 2px; }
+  .termo ul, .termo ol { margin: 2px 0 3px 16px; padding: 0; }
+  .termo li { margin: 1px 0; }
+  .termo hr { border: 0; border-top: 1px solid #aaa; margin: 3px 0; }
+  .termo a { color: #000; text-decoration: underline; }
+  .termo code { font-family: monospace; }
   .mt { margin-top: 5px; }
   h-spacer { display:block; height:5px; }
 </style>
@@ -224,7 +231,7 @@
   {% if doc.tipo == 'os' and prefs.os_print_garantia == '1' and empresa.termo_garantia %}
   <!-- TERMO DE GARANTIA (parâmetro os_print_garantia; texto vem dos dados da empresa) -->
   <div class="sec mt">TERMO DE GARANTIA</div>
-  <div class="termo">{{ empresa.termo_garantia }}</div>
+  <div class="termo">{{ termo_html | safe }}</div>
   {% endif %}
 
   <!-- ASSINATURAS -->
