@@ -3,6 +3,7 @@
 Mantém o mesmo conteúdo e disposição do print (cabeçalho da empresa, dados da pessoa/veículo,
 tabela de itens, resumo financeiro e condições) numa planilha sem proteção, pronta para edição.
 """
+import math
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -285,12 +286,22 @@ def gerar(doc, empresa, cliente, veiculo, prefs=None) -> bytes:
     # ---- Termo de garantia (somente O.S. e se o parâmetro estiver ligado) ----
     if doc.get("tipo") == "os" and str(prefs.get("os_print_garantia", "0")) == "1" and empresa.get("termo_garantia"):
         secao("TERMO DE GARANTIA")
-        r = row[0]
-        merge(r, "A", "G")
-        ws[f"A{r}"].value, ws[f"A{r}"].alignment = markdown_min.to_text(empresa.get("termo_garantia")), _L
-        ws.row_dimensions[r].height = 46
-        box(r, r)
-        row[0] += 1
+        blocos = markdown_min.to_blocks(empresa.get("termo_garantia")) or [{"texto": "", "negrito": False}]
+        n = len(blocos)
+        for idx, b in enumerate(blocos):  # uma linha por bloco; títulos em negrito; caixa ao redor
+            r = row[0]
+            merge(r, "A", "G")
+            cel = ws[f"A{r}"]
+            cel.value = b["texto"]
+            cel.font = Font(size=8, bold=b["negrito"])
+            cel.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            visuais = max(1, math.ceil(len(b["texto"]) / 115))  # ~115 caracteres por linha em A:G
+            ws.row_dimensions[r].height = max(13, visuais * 11)
+            for c in COLS:
+                ws[f"{c}{r}"].border = Border(
+                    top=_THIN if idx == 0 else None, bottom=_THIN if idx == n - 1 else None,
+                    left=_THIN if c == "A" else None, right=_THIN if c == "G" else None)
+            row[0] += 1
 
     # ---- Assinaturas ----
     row[0] += 1

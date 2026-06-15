@@ -66,6 +66,16 @@ def to_html(md) -> str:
     return "".join(out)
 
 
+def _strip_inline(t: str) -> str:
+    """Remove os operadores inline (negrito/itálico/código/links) deixando só o texto."""
+    t = re.sub(r"`([^`]+)`", r"\1", t)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = re.sub(r"\*([^*\n]+)\*", r"\1", t)
+    t = re.sub(r"_([^_\n]+)_", r"\1", t)
+    return re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"\1", t)
+
+
 def to_text(md) -> str:
     """Texto sem operadores markdown — legível na planilha."""
     if not md:
@@ -75,11 +85,26 @@ def to_text(md) -> str:
         t = re.sub(r"^\s*#{1,6}\s+", "", ln)
         t = re.sub(r"^\s*[-*]\s+", "• ", t)
         t = re.sub(r"^\s*---+\s*$", "", t)
-        t = re.sub(r"`([^`]+)`", r"\1", t)
-        t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
-        t = re.sub(r"__([^_]+)__", r"\1", t)
-        t = re.sub(r"\*([^*\n]+)\*", r"\1", t)
-        t = re.sub(r"_([^_\n]+)_", r"\1", t)
-        t = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"\1", t)
-        out.append(t)
+        out.append(_strip_inline(t))
     return "\n".join(out).strip()
+
+
+def to_blocks(md):
+    """Lista de blocos {texto, negrito} — um por linha — para montar o termo na planilha."""
+    if not md:
+        return []
+    blocos = []
+    for ln in str(md).replace("\r\n", "\n").split("\n"):
+        m = re.match(r"^\s*#{1,6}\s+(.*)$", ln)
+        if m:
+            blocos.append({"texto": _strip_inline(m.group(1)), "negrito": True})
+            continue
+        if re.match(r"^\s*---+\s*$", ln):
+            blocos.append({"texto": "", "negrito": False})
+            continue
+        m = re.match(r"^\s*[-*]\s+(.*)$", ln)
+        if m:
+            blocos.append({"texto": "• " + _strip_inline(m.group(1)), "negrito": False})
+            continue
+        blocos.append({"texto": _strip_inline(ln), "negrito": False})
+    return blocos
