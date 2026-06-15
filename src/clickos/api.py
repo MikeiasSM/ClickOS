@@ -185,8 +185,10 @@ class Api:
         # Cards do dashboard — em nenhum se contabilizam documentos cancelados
         orcamentos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status<>'Cancelado'")
         os_count = one("SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status<>'Cancelada'")
-        # "Em aberto" = O.S. ainda não concluídas: apenas Aberta + Em Execução
-        em_aberto = one("SELECT COUNT(*) FROM documentos WHERE tipo='os' AND status IN ('Aberta','Em Execução')")
+        # "Em aberto" = O.S. ainda não concluídas: apenas Aberta + Em Execução (qtde e valor)
+        EM_ABERTO = "tipo='os' AND status IN ('Aberta','Em Execução')"
+        em_aberto = one(f"SELECT COUNT(*) FROM documentos WHERE {EM_ABERTO}")
+        valor_em_aberto = one(f"SELECT COALESCE(SUM(total),0) FROM documentos WHERE {EM_ABERTO}")
         orc_abertos = one("SELECT COUNT(*) FROM documentos WHERE tipo='orcamento' AND status='Aberto'")
         clientes = one("SELECT COUNT(*) FROM clientes")
         veiculos = one("SELECT COUNT(*) FROM veiculos")
@@ -214,6 +216,7 @@ class Api:
                 y -= 1
             meses.append({"label": mes_pt[mo - 1], "valor": round(raw.get(f"{y:04d}-{mo:02d}", 0) or 0, 2)})
         return {"total": total, "orcamentos": orcamentos, "os_count": os_count, "em_aberto": em_aberto,
+                "valor_em_aberto": valor_em_aberto,
                 "orcamentos_abertos": orc_abertos, "clientes": clientes, "veiculos": veiculos,
                 "faturamento_mes": fat_mes, "faturamento_total": fat_total, "ticket_medio": ticket,
                 "pipeline": pipe, "fat_meses": meses, "recentes": repo.documentos.list(con)[:6]}

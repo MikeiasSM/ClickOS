@@ -470,7 +470,7 @@ async function viewDashboard() {
     </div>
     <div class="cards kpis">
       ${kpi("Ordens de Serviço", d.os_count, "wrench", "#2563eb", "#dbeafe", d.em_aberto + " em aberto")}
-      ${kpi("O.S. em aberto", d.em_aberto, "trending", "#d97706", "#fef9c3", "Abertas + em execução")}
+      ${kpi("Ordens de Serviço em Aberto", money(d.valor_em_aberto), "trending", "#d97706", "#fef9c3", d.em_aberto + " O.S. (abertas + em execução)")}
       ${kpi("Faturamento do mês", money(d.faturamento_mes), "dollar", "#16a34a", "#dcfce7", "Total em OS: " + money(d.faturamento_total))}
       ${kpi("Orçamentos", d.orcamentos, "file", "#7c3aed", "#f3e8ff", d.orcamentos_abertos + " abertos")}
     </div>
