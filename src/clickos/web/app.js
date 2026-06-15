@@ -1831,6 +1831,8 @@ function showWizard() {
       wsteps.innerHTML = STEPS.map((s, i) => `<span class="wiz-pill ${i === step ? "on" : i < step ? "done" : ""}">${i + 1}. ${esc(s)}</span>`).join("");
       back.style.visibility = step === 0 ? "hidden" : "";
       next.textContent = step === STEPS.length - 1 ? "Concluir" : "Próximo";
+      // sem o acesso criado não é possível pular: o botão vira "Sair" e encerra a aplicação
+      ov.querySelector("#wskip").textContent = meuUsuario ? "Pular configuração" : "Sair do ClickOS";
       wsub.textContent = `Passo ${step + 1} de ${STEPS.length}`;
       if (step === 0) {
         body.innerHTML = `<p class="muted">Crie o <b>seu acesso</b> para usar o sistema no dia a dia. Você administra tudo com a sua própria conta.</p>
@@ -1882,7 +1884,13 @@ function showWizard() {
       resolve();
     }
     back.onclick = () => { if (step > 0) { step--; renderBody(); } };
-    ov.querySelector("#wskip").onclick = () => concluir();
+    ov.querySelector("#wskip").onclick = async () => {
+      if (meuUsuario) { concluir(); return; }  // acesso já criado: pular o restante é permitido
+      // 1º uso: criar o seu acesso é obrigatório — sem ele, encerra a aplicação
+      if (await confirma("Você precisa criar o seu acesso para usar o ClickOS. Sem isso a aplicação será encerrada.\n\nDeseja sair?", { danger: true, ok: "Sair do ClickOS" })) {
+        try { await api("fechar_app"); } catch (e) {}
+      }
+    };
     next.onclick = async () => {
       if (step === 0) {
         const nome = body.querySelector("#wnome").value.trim();

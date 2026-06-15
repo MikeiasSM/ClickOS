@@ -453,6 +453,12 @@ class Api:
         return True
 
     @_api
+    def fechar_app(self):
+        """Encerra a aplicação (1º uso: quando o usuário se recusa a criar o acesso obrigatório)."""
+        self._win().destroy()
+        return True
+
+    @_api
     def escolher_logo(self):
         """Abre o diálogo nativo para escolher a imagem do logo e a salva no banco (BLOB)."""
         res = self._win().create_file_dialog(
