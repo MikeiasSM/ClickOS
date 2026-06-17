@@ -13,6 +13,10 @@ class EmVinculo(Exception):
     """Levantada ao tentar excluir um registro que possui documentos vinculados."""
 
 
+class PermissaoNegada(Exception):
+    """Levantada quando o usuário da sessão não tem permissão para o módulo solicitado."""
+
+
 def image_data_uri(blob) -> str:
     """Monta um data: URI a partir dos bytes de uma imagem (detecta png/jpeg/gif/webp)."""
     if not blob:

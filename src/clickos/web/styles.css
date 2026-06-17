@@ -519,3 +519,18 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .qr-box{display:flex;justify-content:center;margin:14px 0}
 .qr-box svg{width:230px;height:230px}
 .qr-url{font-family:monospace;font-size:13px;background:#f3f4f6;border-radius:6px;padding:8px;word-break:break-all}
+
+/* papéis e permissões (RBAC) */
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip-mod{display:inline-block;background:#eff6ff;color:var(--blue);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600}
+.mod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 16px}
+.mod-check{display:flex;align-items:center;gap:8px;font-size:13.5px;color:#334155;font-weight:500;cursor:pointer}
+.mod-check input{width:auto;margin:0}
+.perm-adv{margin:4px 0 10px;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:#fafbfc}
+.perm-adv > summary{cursor:pointer;font-weight:600;font-size:13.5px;color:#334155;list-style:none}
+.perm-adv > summary::-webkit-details-marker{display:none}
+.perm-adv > summary:before{content:"▸";margin-right:8px;color:var(--blue)}
+.perm-adv[open] > summary:before{content:"▾"}
+.ov-grid{display:flex;flex-direction:column;gap:6px}
+.ov-row{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:13.5px;color:#1e293b}
+.ov-row .pref-sel{width:160px}

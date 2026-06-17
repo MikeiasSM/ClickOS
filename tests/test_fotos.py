@@ -18,9 +18,9 @@ def _os(con):
         "tipo": "os", "data_abertura": "2026-06-15", "cliente_id": c["id"], "km_entrada": "1", "itens": []})
 
 
-def test_schema_v12_e_tabela(tmp_path):
+def test_schema_atual_e_tabela(tmp_path):
     con = db.connect(tmp_path / "novo.db")
-    assert con.execute("SELECT schema_version FROM meta").fetchone()[0] == 12
+    assert con.execute("SELECT schema_version FROM meta").fetchone()[0] == db.SCHEMA_VERSION
     assert con.execute("SELECT name FROM sqlite_master WHERE name='documento_fotos'").fetchone()
     assert con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
 
@@ -31,7 +31,7 @@ def test_migracao_de_v11(tmp_path):
     con.commit()
     con.close()
     con2 = db.connect(tmp_path / "antigo.db")  # reabrir dispara a migração
-    assert con2.execute("SELECT schema_version FROM meta").fetchone()[0] == 12
+    assert con2.execute("SELECT schema_version FROM meta").fetchone()[0] == db.SCHEMA_VERSION
 
 
 def test_add_redimensiona_e_gera_thumb(tmp_path):

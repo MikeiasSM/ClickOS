@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -40,6 +40,30 @@ STATUS_LISTA = STATUS_ORCAMENTO + STATUS_OS  # união (para filtros)
 ESTADO_GERAL_LISTA = ["Sem avarias aparentes", "Com avarias registradas"]
 FORMAS_PAGAMENTO = ["Dinheiro", "PIX", "Cartão de Débito", "Cartão de Crédito",
                     "Transferência/TED", "Boleto", "Cheque", "Parcelado"]
+
+# ----------------------------------------------------------------- RBAC (controle de acesso)
+# Módulos controláveis por papel/usuário (chave técnica + rótulo exibido).
+MODULOS = [
+    ("dashboard", "Dashboard"),
+    ("orcamentos", "Orçamentos"),
+    ("os", "Ordens de Serviço"),
+    ("pessoas", "Pessoas"),
+    ("veiculos", "Veículos"),
+    ("produtos", "Produtos e Serviços"),
+    ("faturar", "Faturar O.S."),
+    ("configuracoes", "Configurações"),
+    ("usuarios", "Usuários e Permissões"),
+]
+MODULO_KEYS = [k for k, _ in MODULOS]
+
+# Papéis padrão criados em toda instalação (sistema=1: não excluíveis, não renomeáveis).
+PAPEIS_PADRAO = [
+    ("Administrador", "Acesso total ao sistema.", list(MODULO_KEYS)),
+    ("Atendente", "Orçamentos, O.S. e cadastros; sem configurações nem usuários.",
+     ["dashboard", "orcamentos", "os", "pessoas", "veiculos", "produtos", "faturar"]),
+    ("Mecânico", "Acompanha as O.S., muda status e anexa fotos.", ["dashboard", "os"]),
+]
+PAPEL_PADRAO_NOVO = "Atendente"  # papel atribuído a um usuário novo quando nenhum é informado
 
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (schema_version INTEGER NOT NULL);
@@ -155,10 +179,29 @@ CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   login TEXT NOT NULL UNIQUE, nome TEXT, senha_hash TEXT, salt TEXT,
   ativo INTEGER NOT NULL DEFAULT 1, criado_em TEXT,
-  avatar BLOB, must_change INTEGER NOT NULL DEFAULT 0
+  avatar BLOB, must_change INTEGER NOT NULL DEFAULT 0,
+  papel_id INTEGER REFERENCES papeis(id)
 );
 -- unicidade de login case-insensitive (reforça a regra "login sempre MAIÚSCULO/único")
 CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_login_nocase ON usuarios(login COLLATE NOCASE);
+
+-- RBAC: papéis (perfis) + módulos do papel + exceções por usuário (override).
+CREATE TABLE IF NOT EXISTS papeis (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome TEXT NOT NULL UNIQUE, descricao TEXT,
+  sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT
+);
+CREATE TABLE IF NOT EXISTS papel_modulos (
+  papel_id INTEGER NOT NULL REFERENCES papeis(id) ON DELETE CASCADE,
+  modulo TEXT NOT NULL,
+  PRIMARY KEY (papel_id, modulo)
+);
+CREATE TABLE IF NOT EXISTS usuario_modulos (
+  usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+  modulo TEXT NOT NULL,
+  permitido INTEGER NOT NULL,   -- 1 = exceção que LIBERA o módulo; 0 = exceção que BLOQUEIA
+  PRIMARY KEY (usuario_id, modulo)
+);
 """
 
 CATALOGO_EXEMPLO = [
@@ -237,10 +280,33 @@ def _migrate(con: sqlite3.Connection) -> None:
     if ver < 12:
         # documento_fotos + índice já criados por executescript(DDL) acima (IF NOT EXISTS); só registra a versão.
         con.execute("UPDATE meta SET schema_version = 12")
+    if ver < 13:
+        # RBAC: tabelas já criadas pelo DDL acima; falta a coluna em bancos existentes.
+        _add_column(con, "usuarios", "papel_id", "INTEGER REFERENCES papeis(id)")
+        con.execute("UPDATE meta SET schema_version = 13")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)
+    _seed_papeis(con)
     con.commit()
+
+
+def _seed_papeis(con: sqlite3.Connection) -> None:
+    """Garante os papéis padrão e que todo usuário tenha um papel.
+    Idempotente: só cria o que falta e só preenche papel_id nulo (não sobrescreve escolhas)."""
+    from . import services  # noqa: F401  (mantém simetria com _seed_usuarios; não usado diretamente)
+    for nome, descricao, mods in PAPEIS_PADRAO:
+        existe = con.execute("SELECT id FROM papeis WHERE nome=? COLLATE NOCASE", (nome,)).fetchone()
+        if existe is None:
+            con.execute("INSERT INTO papeis(nome, descricao, sistema, criado_em) VALUES (?,?,1,?)",
+                        (nome, descricao, datetime.now().isoformat(timespec="seconds")))
+            pid = con.execute("SELECT id FROM papeis WHERE nome=? COLLATE NOCASE", (nome,)).fetchone()[0]
+            con.executemany("INSERT OR IGNORE INTO papel_modulos(papel_id, modulo) VALUES (?,?)",
+                            [(pid, m) for m in mods])
+    # instalações existentes: dá Administrador a quem ainda não tem papel (evita travar o acesso)
+    admin = con.execute("SELECT id FROM papeis WHERE nome='Administrador'").fetchone()
+    if admin is not None:
+        con.execute("UPDATE usuarios SET papel_id=? WHERE papel_id IS NULL", (admin[0],))
 
 
 def _seed_usuarios(con: sqlite3.Connection) -> None:

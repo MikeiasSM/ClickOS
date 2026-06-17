@@ -404,7 +404,20 @@ function cadastrarCidade(nome, onDone) {
 /* ----------------------------------------------------------------- router */
 function setActive(view) { document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("active", a.dataset.view === view)); const cb = document.getElementById("btn-config"); if (cb) cb.classList.toggle("active", view === "config"); }
 const VIEWS = { dashboard: viewDashboard, orcamentos: viewOrcamentos, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos };
-async function setView(view) { setActive(view); const mr = document.getElementById("modal-root"); if (mr) mr.innerHTML = ""; try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
+const VIEW_MOD = { dashboard: "dashboard", orcamentos: "orcamentos", documentos: "os", clientes: "pessoas", veiculos: "veiculos", produtos: "produtos" };
+/* RBAC no cliente: apenas conveniência de UX — a autorização real é no servidor (_requer). */
+function pode(mod) { return !!(CURRENT_USER && (CURRENT_USER.is_suporte || (CURRENT_USER.modulos || []).includes(mod))); }
+function primeiraView() { return Object.keys(VIEWS).find(v => pode(VIEW_MOD[v])) || "dashboard"; }
+function aplicarPermissoes() {
+  document.querySelectorAll(".menu a").forEach(a => { a.style.display = pode(VIEW_MOD[a.dataset.view]) ? "" : "none"; });
+  const cfg = document.getElementById("btn-config");
+  if (cfg) cfg.style.display = (pode("configuracoes") || pode("usuarios")) ? "" : "none";
+}
+async function setView(view) {
+  if (VIEW_MOD[view] && !pode(VIEW_MOD[view])) { const alvo = primeiraView(); if (alvo === view) return; toast("Você não tem permissão para acessar este módulo.", "err"); view = alvo; }
+  setActive(view); const mr = document.getElementById("modal-root"); if (mr) mr.innerHTML = "";
+  try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); }
+}
 
 /* ----------------------------------------------------------------- dashboard */
 function kpi(label, v, icon, color, bg, sub) {
@@ -1553,15 +1566,19 @@ async function renderEmpresa(container) {
 
 /* ----------------------------------------------------------------- configurações (abas) */
 async function viewConfiguracoes(tab) {
-  tab = tab || "empresa";
   setActive("config");
+  const cfg = pode("configuracoes"), usr = pode("usuarios");
+  // monta apenas as abas que o usuário pode acessar
+  const abas = [];
+  if (cfg) abas.push(["empresa", "building", "Empresa"], ["preferencias", "settings", "Preferências"]);
+  if (usr) abas.push(["usuarios", "shield", "Usuários"], ["papeis", "lock", "Papéis"]);
+  if (cfg) abas.push(["backup", "save", "Backup e Restauração"], ["auditoria", "list", "Auditoria"]);
+  if (!abas.length) { render(`<div class="empty">Você não tem permissão para acessar as Configurações.</div>`); return; }
+  const validas = abas.map(a => a[0]);
+  tab = validas.includes(tab) ? tab : validas[0];
   render(`<h1 class="page-title">Configurações</h1><p class="page-sub">Empresa, usuários e backup do sistema</p>
     <div class="tabs" id="cfgtabs">
-      <button data-tab="empresa">${ic("building", 16)}<span>Empresa</span></button>
-      <button data-tab="preferencias">${ic("settings", 16)}<span>Preferências</span></button>
-      <button data-tab="usuarios">${ic("shield", 16)}<span>Usuários</span></button>
-      <button data-tab="backup">${ic("save", 16)}<span>Backup e Restauração</span></button>
-      <button data-tab="auditoria">${ic("list", 16)}<span>Auditoria</span></button>
+      ${abas.map(([t, icn, lbl]) => `<button data-tab="${t}">${ic(icn, 16)}<span>${lbl}</span></button>`).join("")}
     </div>
     <div id="cfgbody" class="mt"></div>`);
   const tabs = main().querySelector("#cfgtabs");
@@ -1571,6 +1588,7 @@ async function viewConfiguracoes(tab) {
   if (tab === "empresa") await renderEmpresa(body);
   else if (tab === "preferencias") await renderPreferencias(body);
   else if (tab === "usuarios") await renderUsuarios(body);
+  else if (tab === "papeis") await renderPapeis(body);
   else if (tab === "auditoria") await renderAuditoria(body);
   else renderBackup(body);
 }
@@ -1585,7 +1603,7 @@ const AUDIT_ACOES = {
 };
 const AUDIT_ENT = { cliente: "Pessoa", veiculo: "Veículo", item: "Produto/Serviço", documento: "Documento",
   usuario: "Usuário", empresa: "Empresa", preferencias: "Preferências", parametro: "Parâmetro",
-  foto: "Foto", foto_sessao: "Captura por celular" };
+  foto: "Foto", foto_sessao: "Captura por celular", papel: "Papel de acesso" };
 function fmtAuditVal(v) { if (v === null || v === undefined || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v); }
 
 async function renderAuditoria(container) {
@@ -1733,7 +1751,7 @@ async function renderUsuarios(container) {
       const eu = CURRENT_USER && u.id === CURRENT_USER.id;
       const ava = u.avatar_uri ? `<div class="avatar blue" style="overflow:hidden"><img src="${u.avatar_uri}" style="width:100%;height:100%;object-fit:cover"></div>` : `<div class="avatar blue">${ic("user", 22)}</div>`;
       const r = h(`<div class="list-row">${ava}<div class="grow">
-        <div style="font-weight:700">${esc(u.nome || u.login)} ${eu ? '<span class="badge b-os">você</span>' : ""} ${u.is_suporte ? '<span class="badge b-orc">mestre</span>' : ""} ${u.ativo ? "" : '<span class="badge b-gray">Inativo</span>'} ${u.must_change ? '<span class="badge b-aberta">senha provisória</span>' : ""}</div>
+        <div style="font-weight:700">${esc(u.nome || u.login)} ${eu ? '<span class="badge b-os">você</span>' : ""} ${u.is_suporte ? '<span class="badge b-orc">mestre</span>' : (u.papel_nome ? `<span class="badge b-orc">${esc(u.papel_nome)}</span>` : "")} ${u.ativo ? "" : '<span class="badge b-gray">Inativo</span>'} ${u.must_change ? '<span class="badge b-aberta">senha provisória</span>' : ""}</div>
         <div class="small muted">Login: ${esc(u.login)}</div></div><div class="acts"></div></div>`);
       const a = r.querySelector(".acts");
       const souSuporte = CURRENT_USER && CURRENT_USER.is_suporte;
@@ -1754,10 +1772,28 @@ async function delUsuario(u) {
     await api("delete_usuario", u.id); toast("Usuário excluído", "ok"); viewConfiguracoes("usuarios");
   }
 }
-function formUsuario(u, opts) {
+async function formUsuario(u, opts) {
   u = u || { ativo: 1 };
+  const ehSuporte = !!u.is_suporte;
+  let papeis = [], ovr = {};
+  if (!ehSuporte) {
+    try { papeis = await api("list_papeis"); } catch (e) { papeis = []; }
+    if (u.id) { try { const pr = await api("usuario_permissoes", u.id); ovr = pr.overrides || {}; } catch (e) {} }
+  }
+  const mods = B.modulos || [];
+  const papelSel = ehSuporte ? "" :
+    `<div class="field"><label>Papel de acesso *</label>
+       <select id="papel" class="pref-sel">${papeis.map(p => `<option value="${p.id}" ${String(u.papel_id) === String(p.id) ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}</select></div>`;
+  const ovrRows = ehSuporte ? "" : mods.map(mm => {
+    const v = (mm.chave in ovr) ? String(ovr[mm.chave]) : "";
+    return `<div class="ov-row"><span>${esc(mm.rotulo)}</span>
+      <select class="pref-sel ov-sel" data-mod="${mm.chave}">
+        <option value="" ${v === "" ? "selected" : ""}>Padrão do papel</option>
+        <option value="1" ${v === "1" ? "selected" : ""}>Liberar</option>
+        <option value="0" ${v === "0" ? "selected" : ""}>Bloquear</option></select></div>`;
+  }).join("");
   let avatarB64 = null, avatarRemover = false;  // estado do avatar escolhido nesta edição
-  const m = h(`<div class="modal" style="width:480px"><button class="close">×</button><h3>${u.id ? "Editar" : "Novo"} Usuário</h3>
+  const m = h(`<div class="modal" style="width:500px"><button class="close">×</button><h3>${u.id ? "Editar" : "Novo"} Usuário</h3>
     <div class="ava-box">
       <div class="ava-prev" id="ava">${u.avatar_uri ? `<img src="${u.avatar_uri}">` : ic("user", 30)}</div>
       <div><div style="font-weight:700;margin-bottom:2px">Avatar</div><div class="muted small" style="margin-bottom:8px">Foto do usuário (opcional).</div>
@@ -1767,7 +1803,11 @@ function formUsuario(u, opts) {
     <div class="field"><label>Nome</label><input id="nome" value="${esc(u.nome || "")}"></div>
     <div class="field"><label>Login * (MAIÚSCULAS)</label><input id="login" value="${esc(u.login || "")}" autocomplete="off" ${u.is_suporte ? "readonly" : ""}></div>
     <div class="field"><label>Senha ${u.id ? "(em branco mantém a atual)" : "*"}</label><input id="senha" type="password" autocomplete="new-password" placeholder="${u.id ? "••••••••" : "Mínimo 4 caracteres"}"></div>
-    <div class="field"><label>Situação</label><div id="c_ativo"></div></div>
+    <div class="grid2">${papelSel}
+      <div class="field"><label>Situação</label><div id="c_ativo"></div></div></div>
+    ${ehSuporte ? "" : `<details class="perm-adv"><summary>Ajuste fino de permissões (exceções)</summary>
+      <p class="muted small" style="margin:8px 0">Por padrão o usuário herda os módulos do papel. Use as exceções apenas para liberar ou bloquear módulos específicos para esta pessoa.</p>
+      <div class="ov-grid">${ovrRows}</div></details>`}
     <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
   const bg = openModal(m);
   const loginInput = m.querySelector("#login"), nomeInput = m.querySelector("#nome");
@@ -1788,15 +1828,72 @@ function formUsuario(u, opts) {
   m.querySelector("#sv").onclick = async () => {
     const senha = m.querySelector("#senha").value;
     const payload = { id: u.id, nome: val("#nome", m), login: val("#login", m), senha, ativo: parseInt(ativoCombo._value()) };
+    if (!ehSuporte) {
+      const ps = m.querySelector("#papel"); if (ps) payload.papel_id = parseInt(ps.value) || null;
+      const overrides = {};
+      m.querySelectorAll(".ov-sel").forEach(s => { if (s.value !== "") overrides[s.dataset.mod] = parseInt(s.value); });
+      payload.overrides = overrides;
+    }
     if (avatarB64) payload.avatar_b64 = avatarB64; else if (avatarRemover) payload.avatar_remove = true;
     if (!payload.login) { toast("Login é obrigatório", "err"); return; }
     if (!u.id && senha.length < 4) { toast("A senha deve ter ao menos 4 caracteres", "err"); return; }
     const saved = await api("save_usuario", payload);
+    if (!saved) return;
     if (CURRENT_USER && saved && saved.id === CURRENT_USER.id) { CURRENT_USER.nome = saved.nome; CURRENT_USER.login = saved.login; CURRENT_USER.avatar_uri = saved.avatar_uri; mountUserChip(); }
     toast("Usuário salvo", "ok"); bg.remove();
     if (opts && opts.onSaved) opts.onSaved(saved); else viewConfiguracoes("usuarios");
   };
 }
+/* ----------------------------------------------------------------- papéis de acesso (RBAC) */
+async function renderPapeis(container) {
+  const papeis = await api("list_papeis");
+  const mods = B.modulos || [];
+  const rotulo = k => (mods.find(m => m.chave === k) || {}).rotulo || k;
+  container.innerHTML = `<div class="between" style="margin-bottom:14px">
+      <div class="muted small">${papeis.length} papel(is) · um papel define quais módulos o usuário acessa</div>
+      <button class="btn btn-primary" id="novop">${ic("plus", 16)}<span>Novo Papel</span></button></div>
+    <div id="plista"></div>`;
+  injectIcons(container);
+  const lst = container.querySelector("#plista");
+  const list = h(`<div class="list-rows"></div>`);
+  papeis.forEach(p => {
+    const chips = (p.modulos || []).map(k => `<span class="chip-mod">${esc(rotulo(k))}</span>`).join("") || '<span class="muted small">Nenhum módulo</span>';
+    const r = h(`<div class="list-row"><div class="avatar blue">${ic("lock", 20)}</div><div class="grow">
+      <div style="font-weight:700">${esc(p.nome)} ${p.sistema ? '<span class="badge b-gray">padrão</span>' : ""} <span class="badge b-os">${p.usuarios} usuário(s)</span></div>
+      ${p.descricao ? `<div class="small muted">${esc(p.descricao)}</div>` : ""}
+      <div class="chip-row">${chips}</div></div><div class="acts"></div></div>`);
+    const a = r.querySelector(".acts");
+    a.appendChild(btn("", "edit", () => formPapel(p)));
+    if (!p.sistema) a.appendChild(btn("", "trash", () => delPapel(p), "btn-danger"));
+    list.appendChild(r);
+  });
+  lst.appendChild(list); injectIcons(lst);
+  container.querySelector("#novop").onclick = () => formPapel(null);
+}
+async function delPapel(p) {
+  if (!await confirma(`Excluir o papel "${esc(p.nome)}"?`, { danger: true, ok: "Excluir" })) return;
+  try { await api("delete_papel", p.id); toast("Papel excluído", "ok"); viewConfiguracoes("papeis"); } catch (e) {}
+}
+function formPapel(p) {
+  p = p || { modulos: [], sistema: 0 };
+  const mods = B.modulos || [];
+  const checks = mods.map(mm => `<label class="mod-check"><input type="checkbox" value="${mm.chave}" ${(p.modulos || []).includes(mm.chave) ? "checked" : ""}><span>${esc(mm.rotulo)}</span></label>`).join("");
+  const m = h(`<div class="modal" style="width:540px"><button class="close">×</button><h3>${p.id ? "Editar" : "Novo"} Papel</h3>
+    ${p.sistema ? '<p class="muted small" style="margin:0 0 12px">Papel padrão do sistema: o nome é fixo, mas você pode ajustar os módulos.</p>' : ""}
+    <div class="field"><label>Nome *</label><input id="pnome" value="${esc(p.nome || "")}" ${p.sistema ? "readonly" : ""}></div>
+    <div class="field"><label>Descrição</label><input id="pdesc" value="${esc(p.descricao || "")}"></div>
+    <div class="field"><label>Módulos liberados</label><div class="mod-grid">${checks}</div></div>
+    <div class="between mt"><button class="btn" id="cc">Cancelar</button><button class="btn btn-primary" id="sv">Salvar</button></div></div>`);
+  const bg = openModal(m);
+  m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#cc").onclick = () => bg.remove();
+  m.querySelector("#sv").onclick = async () => {
+    const nome = val("#pnome", m);
+    if (!nome) { toast("Informe o nome do papel", "err"); return; }
+    const modulos = Array.from(m.querySelectorAll(".mod-grid input:checked")).map(c => c.value);
+    try { await api("save_papel", { id: p.id, nome, descricao: val("#pdesc", m), modulos }); toast("Papel salvo", "ok"); bg.remove(); viewConfiguracoes("papeis"); } catch (e) {}
+  };
+}
+
 /* redefinir senha de outro usuário (valida com a senha do solicitante; alvo troca no 1º login) */
 function redefinirSenha(alvo) {
   const m = h(`<div class="modal" style="width:440px"><button class="close">×</button><h3>Redefinir senha</h3>
@@ -1891,6 +1988,7 @@ function showWizard() {
     let emp;
     try { emp = await api("get_empresa"); } catch (e) { emp = {}; }
     let users = []; try { users = await api("list_usuarios"); } catch (e) {}
+    let adminId = null; try { adminId = (await api("list_papeis")).find(p => p.nome === "Administrador").id; } catch (e) {}
     const STEPS = ["Seu acesso", "Empresa", "Usuários"];
     let step = 0, meuUsuario = null, meuSenha = "", loginEditado = false;
     const ov = h(`<div class="wizard-ov"><div class="wizard-card">
@@ -1983,7 +2081,7 @@ function showWizard() {
           if (senha !== senha2) { werr().textContent = "As senhas não conferem."; return; }
         }
         try {
-          const payload = meuUsuario ? { id: meuUsuario.id, nome, login, ativo: 1 } : { nome, login, senha, ativo: 1 };
+          const payload = meuUsuario ? { id: meuUsuario.id, nome, login, ativo: 1 } : { nome, login, senha, ativo: 1, papel_id: adminId };
           if (meuUsuario && senha) payload.senha = senha;
           meuUsuario = await api("save_usuario", payload);
           if (senha) meuSenha = senha;  // guarda p/ login automático ao concluir
@@ -2020,14 +2118,15 @@ async function logout() {
   CURRENT_USER = await showLogin();
   document.getElementById("app").style.display = "flex";
   mountUserChip();
-  setView("dashboard");
+  aplicarPermissoes();
+  setView(primeiraView());
 }
 
 /* ----------------------------------------------------------------- backup/restore + init */
 async function doBackup() { const r = await api("backup"); if (r && r.arquivo) toast("Backup salvo em: " + r.arquivo, "ok"); }
 async function doRestore() {
   if (!await confirma("Restaurar substituirá TODOS os dados atuais pelos do arquivo escolhido. Continuar?")) return;
-  const r = await api("restore"); if (r && r.restaurado) { toast("Backup restaurado", "ok"); try { B = await api("bootstrap"); } catch (e) {} await refreshSug(); setView("dashboard"); }
+  const r = await api("restore"); if (r && r.restaurado) { toast("Backup restaurado", "ok"); try { B = await api("bootstrap"); } catch (e) {} await refreshSug(); setView(primeiraView()); }
 }
 async function refreshSug() { try { SUG = await api("sugestoes"); } catch (e) {} }
 function bindNav() {
@@ -2057,7 +2156,8 @@ async function start() {
   app.style.display = "flex";
   bindNav();
   mountUserChip();
-  setView("dashboard");
+  aplicarPermissoes();
+  setView(primeiraView());
   window.__p = "done";
 }
 window.__err = "";

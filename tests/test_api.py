@@ -2,7 +2,9 @@ from clickos import api, db
 
 
 def _api(tmp_path):
-    return api.Api(db.connect(tmp_path / "t.db"))
+    a = api.Api(db.connect(tmp_path / "t.db"))
+    a.login({"login": "SUPORTE", "senha": "1234567890"})  # mestre: ignora o RBAC nos testes de fluxo
+    return a
 
 
 def test_bootstrap_and_flow(tmp_path):

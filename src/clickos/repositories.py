@@ -446,14 +446,29 @@ class _Usuarios:
             "must_change": row["must_change"] if "must_change" in row.keys() else 0,
             "avatar_uri": services.image_data_uri(row["avatar"] if "avatar" in row.keys() else None),
             "is_suporte": _norm_login(row["login"]) == SUPORTE_LOGIN,
+            "papel_id": (row["papel_id"] if "papel_id" in row.keys() else None),
         }
+
+    def _papel_nome(self, con, papel_id):
+        if not papel_id:
+            return None
+        r = con.execute("SELECT nome FROM papeis WHERE id=?", (papel_id,)).fetchone()
+        return r[0] if r else None
 
     def list(self, con):
         rows = con.execute("SELECT * FROM usuarios ORDER BY login COLLATE NOCASE").fetchall()
-        return [self._public(r) for r in rows]
+        out = []
+        for r in rows:
+            d = self._public(r)
+            d["papel_nome"] = "Mestre" if d["is_suporte"] else self._papel_nome(con, d["papel_id"])
+            out.append(d)
+        return out
 
     def get(self, con, uid):
-        return self._public(con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone())
+        d = self._public(con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone())
+        if d:
+            d["papel_nome"] = "Mestre" if d["is_suporte"] else self._papel_nome(con, d["papel_id"])
+        return d
 
     def by_login(self, con, login):
         return _row(con.execute(
@@ -471,13 +486,23 @@ class _Usuarios:
         if self.by_login(con, login):
             raise ValueError("Já existe um usuário com esse login.")
         salt, senha_hash = services.hash_senha(senha)
+        papel_id = self._resolver_papel(con, data.get("papel_id"))
         cur = con.execute(
-            "INSERT INTO usuarios(login, nome, senha_hash, salt, ativo, criado_em, avatar, must_change) "
-            "VALUES (?,?,?,?,?,?,?,0)",
+            "INSERT INTO usuarios(login, nome, senha_hash, salt, ativo, criado_em, avatar, must_change, papel_id) "
+            "VALUES (?,?,?,?,?,?,?,0,?)",
             (login, (data.get("nome") or login).strip(), senha_hash, salt,
-             1 if data.get("ativo", 1) else 0, _now(stamp), _decode_avatar(data.get("avatar_b64"))))
+             1 if data.get("ativo", 1) else 0, _now(stamp), _decode_avatar(data.get("avatar_b64")), papel_id))
         con.commit()
         return self.get(con, cur.lastrowid)
+
+    def _resolver_papel(self, con, papel_id):
+        """Valida o papel informado; se ausente/ inválido, usa o papel padrão de novos usuários."""
+        if papel_id:
+            r = con.execute("SELECT id FROM papeis WHERE id=?", (papel_id,)).fetchone()
+            if r:
+                return r[0]
+        r = con.execute("SELECT id FROM papeis WHERE nome=? COLLATE NOCASE", (dbmod.PAPEL_PADRAO_NOVO,)).fetchone()
+        return r[0] if r else None
 
     def update(self, con, uid, data, stamp=None):
         row = con.execute("SELECT * FROM usuarios WHERE id=?", (uid,)).fetchone()
@@ -506,9 +531,44 @@ class _Usuarios:
             sets += ["avatar=?"]; vals += [None]
         elif data.get("avatar_b64"):
             sets += ["avatar=?"]; vals += [_decode_avatar(data.get("avatar_b64"))]
+        if "papel_id" in data and not e_suporte:  # o SUPORTE ignora RBAC; não recebe papel
+            sets += ["papel_id=?"]; vals += [self._resolver_papel(con, data.get("papel_id"))]
         con.execute(f"UPDATE usuarios SET {','.join(sets)} WHERE id=?", vals + [uid])
         con.commit()
         return self.get(con, uid)
+
+    # ---- permissões efetivas (papel + exceções por usuário) ----
+    def permissoes(self, con, uid, is_suporte=False):
+        """Módulos liberados para o usuário: módulos do papel, ajustados pelas exceções (override).
+        SUPORTE (mestre) recebe todos. Ordem canônica de dbmod.MODULOS."""
+        if is_suporte:
+            return list(dbmod.MODULO_KEYS)
+        row = con.execute("SELECT papel_id FROM usuarios WHERE id=?", (uid,)).fetchone()
+        liberados = set()
+        if row and row["papel_id"]:
+            liberados = {x[0] for x in con.execute(
+                "SELECT modulo FROM papel_modulos WHERE papel_id=?", (row["papel_id"],))}
+        for modulo, permitido in con.execute(
+                "SELECT modulo, permitido FROM usuario_modulos WHERE usuario_id=?", (uid,)):
+            if permitido:
+                liberados.add(modulo)
+            else:
+                liberados.discard(modulo)
+        return [k for k in dbmod.MODULO_KEYS if k in liberados]
+
+    def overrides(self, con, uid):
+        """Exceções gravadas para o usuário: {modulo: 1|0} (libera/bloqueia ante o papel)."""
+        return {m: p for m, p in con.execute(
+            "SELECT modulo, permitido FROM usuario_modulos WHERE usuario_id=?", (uid,))}
+
+    def set_overrides(self, con, uid, overrides):
+        """Substitui as exceções do usuário. `overrides` = {modulo: 1|0}; vazio limpa todas."""
+        validos = set(dbmod.MODULO_KEYS)
+        con.execute("DELETE FROM usuario_modulos WHERE usuario_id=?", (uid,))
+        con.executemany(
+            "INSERT OR IGNORE INTO usuario_modulos(usuario_id, modulo, permitido) VALUES (?,?,?)",
+            [(uid, m, 1 if v else 0) for m, v in (overrides or {}).items() if m in validos])
+        con.commit()
 
     def delete(self, con, uid):
         row = con.execute("SELECT login FROM usuarios WHERE id=?", (uid,)).fetchone()
@@ -691,6 +751,77 @@ class _Fotos:
         con.commit()
 
 
+# --------------------------------------------------------------------------- papéis (RBAC)
+class _Papeis:
+    """Papéis (perfis) de acesso. Cada papel libera um conjunto de módulos (dbmod.MODULOS)."""
+
+    def _modulos(self, con, pid):
+        return [x[0] for x in con.execute(
+            "SELECT modulo FROM papel_modulos WHERE papel_id=?", (pid,))]
+
+    def _publico(self, con, row):
+        d = dict(row)
+        d["modulos"] = [k for k in dbmod.MODULO_KEYS if k in set(self._modulos(con, row["id"]))]
+        d["usuarios"] = con.execute("SELECT COUNT(*) FROM usuarios WHERE papel_id=?", (row["id"],)).fetchone()[0]
+        return d
+
+    def list(self, con):
+        rows = con.execute("SELECT * FROM papeis ORDER BY sistema DESC, nome COLLATE NOCASE").fetchall()
+        return [self._publico(con, r) for r in rows]
+
+    def get(self, con, pid):
+        r = con.execute("SELECT * FROM papeis WHERE id=?", (pid,)).fetchone()
+        return self._publico(con, r) if r else None
+
+    def _set_modulos(self, con, pid, modulos):
+        validos = set(dbmod.MODULO_KEYS)
+        con.execute("DELETE FROM papel_modulos WHERE papel_id=?", (pid,))
+        con.executemany("INSERT OR IGNORE INTO papel_modulos(papel_id, modulo) VALUES (?,?)",
+                        [(pid, m) for m in (modulos or []) if m in validos])
+
+    def create(self, con, data, stamp=None):
+        nome = (data.get("nome") or "").strip()
+        if not nome:
+            raise ValueError("Informe o nome do papel.")
+        if con.execute("SELECT 1 FROM papeis WHERE nome=? COLLATE NOCASE", (nome,)).fetchone():
+            raise ValueError("Já existe um papel com esse nome.")
+        cur = con.execute("INSERT INTO papeis(nome, descricao, sistema, criado_em) VALUES (?,?,0,?)",
+                          (nome, (data.get("descricao") or "").strip(), _now(stamp)))
+        self._set_modulos(con, cur.lastrowid, data.get("modulos"))
+        con.commit()
+        return self.get(con, cur.lastrowid)
+
+    def update(self, con, pid, data):
+        row = con.execute("SELECT * FROM papeis WHERE id=?", (pid,)).fetchone()
+        if row is None:
+            raise ValueError("Papel não encontrado.")
+        if row["sistema"]:
+            nome = row["nome"]  # papéis padrão do sistema não são renomeados
+        else:
+            nome = (data.get("nome") or row["nome"]).strip()
+            if con.execute("SELECT 1 FROM papeis WHERE nome=? COLLATE NOCASE AND id<>?",
+                           (nome, pid)).fetchone():
+                raise ValueError("Já existe um papel com esse nome.")
+        desc = data.get("descricao")
+        con.execute("UPDATE papeis SET nome=?, descricao=? WHERE id=?",
+                    (nome, desc if desc is not None else row["descricao"], pid))
+        if "modulos" in data:
+            self._set_modulos(con, pid, data.get("modulos"))
+        con.commit()
+        return self.get(con, pid)
+
+    def delete(self, con, pid):
+        row = con.execute("SELECT * FROM papeis WHERE id=?", (pid,)).fetchone()
+        if row is None:
+            return
+        if row["sistema"]:
+            raise services.EmVinculo("Papéis padrão do sistema não podem ser excluídos.")
+        if con.execute("SELECT COUNT(*) FROM usuarios WHERE papel_id=?", (pid,)).fetchone()[0] > 0:
+            raise services.EmVinculo("Há usuários com este papel. Reatribua-os antes de excluir.")
+        con.execute("DELETE FROM papeis WHERE id=?", (pid,))
+        con.commit()
+
+
 clientes = _Clientes()
 veiculos = _Veiculos()
 itens = _Itens()
@@ -698,3 +829,4 @@ documentos = _Documentos()
 usuarios = _Usuarios()
 auditoria = _Auditoria()
 fotos = _Fotos()
+papeis = _Papeis()

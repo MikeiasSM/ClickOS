@@ -48,6 +48,8 @@ def _api(fn):
     def wrapper(self, *args, **kwargs):
         try:
             return {"ok": True, "data": fn(self, *args, **kwargs)}
+        except services.PermissaoNegada as e:
+            return {"ok": False, "erro": str(e), "negado": True}
         except services.EmVinculo as e:
             return {"ok": False, "erro": str(e)}
         except Exception as e:  # erro amigável para a UI
@@ -64,6 +66,22 @@ class Api:
         if not self.usuario:
             raise ValueError("Sessão expirada. Faça login novamente.")
         return self.usuario
+
+    def _requer(self, modulo):
+        """Garante que o usuário da sessão tem acesso ao módulo (RBAC). SUPORTE ignora."""
+        sess = self._sessao()
+        if sess.get("is_suporte"):
+            return sess
+        if modulo not in (sess.get("modulos") or ()):
+            raise services.PermissaoNegada("Você não tem permissão para esta ação.")
+        return sess
+
+    def _modulo_doc(self, did=None, tipo=None):
+        """Mapeia um documento para o módulo correspondente (orcamentos vs os)."""
+        if tipo is None and did is not None:
+            doc = repo.documentos.get(self.con, did)
+            tipo = (doc or {}).get("tipo")
+        return "orcamentos" if tipo == "orcamento" else "os"
 
     def _audit(self, acao, entidade=None, entidade_id=None, descricao="", detalhes=None, usuario=None):
         """Registra um evento de auditoria sem nunca quebrar a ação principal (já efetivada)."""
@@ -158,6 +176,7 @@ class Api:
             "pecas": dbmod.LISTA_PECAS,
             "preferencias": repo.get_preferencias(self.con),
             "unidades_tempo": list(services.UNIDADES_SEG.keys()),
+            "modulos": [{"chave": k, "rotulo": r} for k, r in dbmod.MODULOS],
             "audit_acoes": ["criar", "editar", "excluir", "status", "parametro", "exportar",
                             "login", "logout", "login_falha", "backup", "restaurar"],
         }
@@ -168,6 +187,7 @@ class Api:
 
     @_api
     def save_preferencias(self, payload):
+        self._requer("configuracoes")
         antes = repo.get_preferencias(self.con)
         saved = repo.save_preferencias(self.con, payload or {})
         mudou = audit.diff(antes, saved)
@@ -178,7 +198,7 @@ class Api:
     # ----------------------------------------------------------------- auditoria (somente leitura)
     @_api
     def list_auditoria(self, filtro=None):
-        self._sessao()  # exige usuário autenticado
+        self._requer("configuracoes")
         f = filtro or {}
         return {
             "registros": repo.auditoria.list(
@@ -252,11 +272,13 @@ class Api:
     def save_documento(self, payload):
         if payload.get("id"):
             antes = repo.documentos.get(self.con, payload["id"])
+            self._requer(self._modulo_doc(tipo=(antes or {}).get("tipo") or payload.get("tipo")))
             saved = repo.documentos.update(self.con, payload["id"], payload, stamp=_stamp())
             self._audit("editar", "documento", saved["id"],
                         f"{_doc_label(saved)} {saved['numero']} editado",
                         {"diff": audit.diff(antes, saved)})
             return saved
+        self._requer(self._modulo_doc(tipo=payload.get("tipo")))
         saved = repo.documentos.create(self.con, payload, stamp=_stamp())
         self._audit("criar", "documento", saved["id"],
                     f"{_doc_label(saved)} {saved['numero']} criado", {"snapshot": audit.snapshot(saved)})
@@ -265,6 +287,7 @@ class Api:
     @_api
     def delete_documento(self, did):
         antes = repo.documentos.get(self.con, did)
+        self._requer(self._modulo_doc(tipo=(antes or {}).get("tipo")))
         repo.documentos.delete(self.con, did)
         self._audit("excluir", "documento", did,
                     f"{_doc_label(antes)} {(antes or {}).get('numero', did)} excluído",
@@ -274,6 +297,9 @@ class Api:
     @_api
     def set_status(self, payload):
         antes = repo.documentos.get(self.con, payload["id"])
+        self._requer(self._modulo_doc(tipo=(antes or {}).get("tipo")))
+        if payload.get("status") == "Faturada":
+            self._requer("faturar")  # faturar é uma permissão à parte
         repo.documentos.set_status(self.con, payload["id"], payload["status"], stamp=_stamp())
         self._audit("status", "documento", payload["id"],
                     f"{_doc_label(antes)} {(antes or {}).get('numero', payload['id'])}: status "
@@ -283,6 +309,7 @@ class Api:
 
     @_api
     def converter_os(self, did):
+        self._requer("os")  # criar uma O.S. a partir do orçamento
         orc = repo.documentos.get(self.con, did)  # estado do orçamento antes da conversão
         nova = services.convert_to_os(self.con, did, stamp=_stamp())
         self._audit("criar", "documento", nova["id"],
@@ -420,6 +447,7 @@ class Api:
 
     @_api
     def save_cliente(self, payload):
+        self._requer("pessoas")
         if payload.get("id"):
             antes = repo.clientes.get(self.con, payload["id"])
             saved = repo.clientes.update(self.con, payload["id"], payload, stamp=_stamp())
@@ -433,6 +461,7 @@ class Api:
 
     @_api
     def delete_cliente(self, cid):
+        self._requer("pessoas")
         antes = repo.clientes.get(self.con, cid)
         repo.clientes.delete(self.con, cid)
         self._audit("excluir", "cliente", cid, f"Pessoa {(antes or {}).get('nome', cid)} excluída",
@@ -450,6 +479,7 @@ class Api:
 
     @_api
     def save_veiculo(self, payload):
+        self._requer("veiculos")
         if payload.get("id"):
             antes = repo.veiculos.get(self.con, payload["id"])
             saved = repo.veiculos.update(self.con, payload["id"], payload, stamp=_stamp())
@@ -463,6 +493,7 @@ class Api:
 
     @_api
     def delete_veiculo(self, vid):
+        self._requer("veiculos")
         antes = repo.veiculos.get(self.con, vid)
         repo.veiculos.delete(self.con, vid)
         self._audit("excluir", "veiculo", vid, f"Veículo {(antes or {}).get('placa', vid)} excluído",
@@ -476,6 +507,7 @@ class Api:
 
     @_api
     def save_item(self, payload):
+        self._requer("produtos")
         if payload.get("id"):
             antes = repo.itens.get(self.con, payload["id"])
             saved = repo.itens.update(self.con, payload["id"], payload)
@@ -489,6 +521,7 @@ class Api:
 
     @_api
     def delete_item(self, iid):
+        self._requer("produtos")
         antes = repo.itens.get(self.con, iid)
         repo.itens.delete(self.con, iid)
         self._audit("excluir", "item", iid, f"Produto/Serviço {(antes or {}).get('nome', iid)} excluído",
@@ -516,6 +549,7 @@ class Api:
 
     @_api
     def save_empresa(self, payload):
+        self._requer("configuracoes")
         if len(payload.get("termo_garantia") or "") > 15000:
             raise ValueError("O termo de garantia excede o limite de 15.000 caracteres.")
         campos = ["razao_social", "nome_fantasia", "cnpj", "ie", "endereco", "bairro", "cidade",
@@ -533,6 +567,7 @@ class Api:
 
     @_api
     def remover_logo(self):
+        self._requer("configuracoes")
         self.con.execute("UPDATE empresa SET logo=NULL WHERE id=1")
         self.con.commit()
         self._audit("editar", "empresa", 1, "Logotipo da empresa removido")
@@ -555,6 +590,7 @@ class Api:
     @_api
     def escolher_logo(self):
         """Abre o diálogo nativo para escolher a imagem do logo e a salva no banco (BLOB)."""
+        self._requer("configuracoes")
         res = self._win().create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=False,
             file_types=("Imagens (*.png;*.jpg;*.jpeg;*.bmp)", "Todos os arquivos (*.*)"))
@@ -575,10 +611,12 @@ class Api:
             self._audit("login_falha", "usuario", None, f"Tentativa de login malsucedida: {tentado or '(vazio)'}",
                         usuario={"id": None, "login": tentado or None})
             raise ValueError("Login ou senha inválidos.")
-        # guarda a identidade no servidor (não confiar no cliente para autorização)
-        self.usuario = {"id": user["id"], "login": user["login"], "is_suporte": user["is_suporte"]}
+        # guarda a identidade + módulos no servidor (não confiar no cliente para autorização)
+        modulos = repo.usuarios.permissoes(self.con, user["id"], user["is_suporte"])
+        self.usuario = {"id": user["id"], "login": user["login"],
+                        "is_suporte": user["is_suporte"], "modulos": set(modulos)}
         self._audit("login", "usuario", user["id"], f"Login de {user['login']}")
-        return user
+        return {**user, "modulos": modulos}
 
     @_api
     def logout(self):
@@ -589,12 +627,12 @@ class Api:
 
     @_api
     def list_usuarios(self):
-        self._sessao()
+        self._requer("usuarios")
         return repo.usuarios.list(self.con)
 
     @_api
     def save_usuario(self, payload):
-        sess = self._sessao()
+        sess = self._requer("usuarios")
         if payload.get("id"):
             alvo = repo.usuarios.get(self.con, payload["id"])
             if alvo and alvo.get("is_suporte") and not sess.get("is_suporte"):
@@ -604,15 +642,57 @@ class Api:
             if (payload.get("senha") or "").strip():
                 det["senha_alterada"] = True
             self._audit("editar", "usuario", saved["id"], f"Usuário {saved.get('login', '')} editado", det)
+        else:
+            saved = repo.usuarios.create(self.con, payload, stamp=_stamp())
+            self._audit("criar", "usuario", saved["id"], f"Usuário {saved.get('login', '')} criado",
+                        {"snapshot": audit.snapshot(saved)})
+        if "overrides" in payload and not saved.get("is_suporte"):  # exceções de permissão por usuário
+            repo.usuarios.set_overrides(self.con, saved["id"], payload.get("overrides") or {})
+        return saved
+
+    @_api
+    def usuario_permissoes(self, uid):
+        """Para a tela de permissões: papel atual, exceções gravadas e módulos efetivos do usuário."""
+        self._requer("usuarios")
+        u = repo.usuarios.get(self.con, uid)
+        if not u:
+            raise ValueError("Usuário não encontrado.")
+        return {"papel_id": u.get("papel_id"), "is_suporte": u.get("is_suporte"),
+                "overrides": repo.usuarios.overrides(self.con, uid),
+                "modulos": repo.usuarios.permissoes(self.con, uid, u.get("is_suporte"))}
+
+    # ----------------------------------------------------------------- papéis (RBAC)
+    @_api
+    def list_papeis(self):
+        self._requer("usuarios")
+        return repo.papeis.list(self.con)
+
+    @_api
+    def save_papel(self, payload):
+        self._requer("usuarios")
+        if payload.get("id"):
+            antes = repo.papeis.get(self.con, payload["id"])
+            saved = repo.papeis.update(self.con, payload["id"], payload)
+            self._audit("editar", "papel", saved["id"], f"Papel {saved.get('nome', '')} alterado",
+                        {"diff": audit.diff(antes, saved)})
             return saved
-        saved = repo.usuarios.create(self.con, payload, stamp=_stamp())
-        self._audit("criar", "usuario", saved["id"], f"Usuário {saved.get('login', '')} criado",
+        saved = repo.papeis.create(self.con, payload, stamp=_stamp())
+        self._audit("criar", "papel", saved["id"], f"Papel {saved.get('nome', '')} criado",
                     {"snapshot": audit.snapshot(saved)})
         return saved
 
     @_api
+    def delete_papel(self, pid):
+        self._requer("usuarios")
+        alvo = repo.papeis.get(self.con, pid)
+        repo.papeis.delete(self.con, pid)
+        self._audit("excluir", "papel", pid, f"Papel {(alvo or {}).get('nome', pid)} excluído",
+                    {"snapshot": audit.snapshot(alvo)})
+        return True
+
+    @_api
     def delete_usuario(self, uid):
-        self._sessao()
+        self._requer("usuarios")
         alvo = repo.usuarios.get(self.con, uid)
         repo.usuarios.delete(self.con, uid)
         self._audit("excluir", "usuario", uid, f"Usuário {(alvo or {}).get('login', uid)} excluído",
@@ -623,7 +703,7 @@ class Api:
     def reset_senha(self, payload):
         """Redefine a senha de outro usuário para a padrão. A identidade do solicitante vem da
         SESSÃO (não do cliente); valida-se a senha do solicitante e protege-se a conta SUPORTE."""
-        sess = self._sessao()
+        sess = self._requer("usuarios")
         alvo_id = payload.get("alvo_id")
         if alvo_id == sess["id"]:
             raise ValueError("Para trocar a sua própria senha, edite o seu usuário.")
@@ -667,6 +747,7 @@ class Api:
     @_api
     def backup(self):
         """Pergunta onde salvar (diálogo nativo) e copia o banco para lá."""
+        self._requer("configuracoes")
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         res = self._win().create_file_dialog(
             webview.SAVE_DIALOG, save_filename=f"clickos-backup-{stamp}.db",
@@ -683,6 +764,7 @@ class Api:
     @_api
     def restore(self):
         """Escolhe um arquivo de backup e substitui o banco atual (reabre a conexão)."""
+        self._requer("configuracoes")
         res = self._win().create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=False,
             file_types=("Banco ClickOS (*.db)", "Todos os arquivos (*.*)"))
