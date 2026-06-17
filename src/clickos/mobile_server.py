@@ -13,6 +13,7 @@ import secrets
 import socket
 import threading
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -177,11 +178,14 @@ def _os_detalhe(d, fotos, sess):
     pode_fat = sess["is_suporte"] or "faturar" in sess["modulos"]
     prox = [st for st in _FLUXO.get(d["status"], []) if st != "Faturada" or pode_fat]
     return {"id": d["id"], "numero": d["numero"], "status": d["status"],
-            "cliente": d.get("cliente_nome"), "veiculo_marca": d.get("veiculo_marca"),
+            "cliente": d.get("cliente_nome"), "cliente_id": d.get("cliente_id"),
+            "veiculo_id": d.get("veiculo_id"), "veiculo_marca": d.get("veiculo_marca"),
             "veiculo_modelo": d.get("veiculo_modelo"), "placa": d.get("veiculo_placa"),
             "km_entrada": d.get("km_entrada"), "responsavel": d.get("usuario_nome"),
-            "total": d.get("total"),
-            "itens": [{"descricao": i.get("descricao"), "quantidade": i.get("quantidade"),
+            "total": d.get("total"), "editavel": d.get("status") != "Faturada",
+            "itens": [{"item_catalogo_id": i.get("item_catalogo_id"), "descricao": i.get("descricao"),
+                       "tipo": i.get("tipo"), "quantidade": i.get("quantidade"),
+                       "valor_unitario": i.get("valor_unitario"), "desconto": i.get("desconto"),
                        "valor_liquido": i.get("valor_liquido")} for i in d.get("itens", [])],
             "fotos": [{"id": f["id"]} for f in fotos],
             "proximos_status": prox, "pode_faturar": pode_fat,
@@ -401,6 +405,30 @@ class _Handler(BaseHTTPRequestHandler):
             if not data:
                 return self._send(404, b"nao encontrado")
             return self._send(200, bytes(data), mime, no_store=True)
+        if rota == ["clientes"]:  # busca p/ criar/editar O.S. no celular
+            s = self._exige("os")
+            if s is None:
+                return
+            q = (parse_qs(urlparse(self.path).query).get("q") or [None])[0]
+            with _DB_LOCK:
+                rows = repo.clientes.search(self.con, q) if q else repo.clientes.list(self.con)
+            return self._json([{"id": r["id"], "nome": r.get("nome"), "telefone": r.get("telefone")} for r in rows[:50]])
+        if rota == ["veiculos"]:
+            s = self._exige("os")
+            if s is None:
+                return
+            cid = (parse_qs(urlparse(self.path).query).get("cliente_id") or [None])[0]
+            with _DB_LOCK:
+                rows = repo.veiculos.by_cliente(self.con, int(cid)) if cid and cid.isdigit() else []
+            return self._json([{"id": r["id"], "placa": r.get("placa"), "marca": r.get("marca"), "modelo": r.get("modelo")} for r in rows])
+        if rota == ["produtos"]:
+            s = self._exige("os")
+            if s is None:
+                return
+            q = (parse_qs(urlparse(self.path).query).get("q") or [None])[0]
+            with _DB_LOCK:
+                rows = repo.itens.search(self.con, q) if q else repo.itens.list(self.con)
+            return self._json([{"id": r["id"], "nome": r.get("nome"), "preco": r.get("preco"), "tipo": r.get("tipo")} for r in rows[:50]])
         return self._json({"erro": "nao encontrado"}, 404)
 
     def _api_post(self, rota):
@@ -443,6 +471,51 @@ class _Handler(BaseHTTPRequestHandler):
             if sid:
                 _remover_sessao(sid)
             return self._json({"ok": True}, extra=[("Set-Cookie", "sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")])
+        if rota == ["os"]:  # criar O.S. pelo celular
+            s = self._exige("os")
+            if s is None:
+                return
+            body = self._corpo_json(limite=512 * 1024) or {}
+            payload = {"tipo": "os", "status": "Aberta", "cliente_id": body.get("cliente_id"),
+                       "veiculo_id": body.get("veiculo_id"), "km_entrada": body.get("km_entrada"),
+                       "data_abertura": datetime.now().isoformat(timespec="seconds"),
+                       "usuario_id": s["uid"], "itens": body.get("itens") or []}
+            try:
+                with _DB_LOCK:
+                    nova = repo.documentos.create(self.con, payload)
+                    try:
+                        audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "criar", "documento",
+                                        nova["id"], f"O.S. {nova['numero']} criada pelo celular")
+                    except Exception:
+                        pass
+            except ValueError as ve:
+                return self._json({"erro": str(ve)}, 400)
+            return self._json({"id": nova["id"], "numero": nova["numero"]})
+        if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "editar":
+            s = self._exige("os")
+            if s is None:
+                return
+            oid = int(rota[1])
+            body = self._corpo_json(limite=512 * 1024) or {}
+            try:
+                with _DB_LOCK:
+                    atual = repo.documentos.get(self.con, oid)
+                    if not atual or atual.get("tipo") != "os":
+                        return self._json({"erro": "O.S. não encontrada."}, 404)
+                    if atual.get("status") == "Faturada":
+                        return self._json({"erro": "Uma O.S. faturada não pode ser editada."}, 400)
+                    payload = {"id": oid, "tipo": "os", "cliente_id": body.get("cliente_id"),
+                               "veiculo_id": body.get("veiculo_id"), "km_entrada": body.get("km_entrada"),
+                               "itens": body.get("itens") or []}
+                    repo.documentos.update(self.con, oid, payload)
+                    try:
+                        audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "editar", "documento",
+                                        oid, f"O.S. {atual['numero']} editada pelo celular")
+                    except Exception:
+                        pass
+            except ValueError as ve:
+                return self._json({"erro": str(ve)}, 400)
+            return self._json({"ok": True})
         if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "status":
             s = self._exige("os")
             if s is None:

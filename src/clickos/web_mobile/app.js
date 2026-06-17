@@ -68,10 +68,12 @@ async function viewLista() {
     return;
   }
   app.innerHTML = topo("Ordens de Serviço", true) + `<div class="content">
+    <button class="btn" id="nova" style="margin-bottom:12px">+ Nova O.S.</button>
     <div class="search">${IC.search}<input id="q" placeholder="Buscar O.S., cliente, placa…" autocapitalize="characters"></div>
     <div class="chips" id="chips"></div>
     <div id="lista"><div class="center"><span class="spin"></span></div></div></div>`;
   bindTop();
+  $("#nova").onclick = () => viewFormOS(null);
   const filtros = ["Todas", "Aberta", "Em Execução", "Concluída", "Faturada"];
   let statusSel = "";
   const chips = $("#chips");
@@ -109,7 +111,8 @@ async function viewDetalhe(id) {
   catch (e) { if (e.status === 401) { ME = null; return viewLogin(); } return viewLista(); }
   const veic = [d.veiculo_marca, d.veiculo_modelo].filter(Boolean).join(" ") || "—";
   const itens = (d.itens || []).map(i => `<div class="it"><span class="grow">${esc(i.descricao || "")}${i.quantidade > 1 ? ` <span class="muted">×${i.quantidade}</span>` : ""}</span><span>${brl(i.valor_liquido)}</span></div>`).join("");
-  const acts = (d.proximos_status || []).map(s => `<button class="btn" data-st="${esc(s)}">${rotuloAcao(s)}</button>`).join("");
+  const acts = (d.proximos_status || []).map(s => `<button class="btn" data-st="${esc(s)}">${rotuloAcao(s)}</button>`).join("")
+    + (d.editavel ? `<button class="btn ghost" id="editar">Editar O.S.</button>` : "");
   app.innerHTML = topo(d.numero, false) + `<div class="content">
     <div class="det-head row"><div class="grow"><div class="num">${esc(d.numero)}</div></div>${badge(d.status)}</div>
     <div class="card">
@@ -128,6 +131,7 @@ async function viewDetalhe(id) {
   </div>`;
   bindTop();
   $("#foto").onclick = () => tirarFoto(id, carregarFotos);
+  const ed = $("#editar"); if (ed) ed.onclick = () => viewFormOS(id);
   app.querySelectorAll("[data-st]").forEach(b => b.onclick = () =>
     b.dataset.st === "Faturada" ? abrirFaturamento(id, d.total) : mudarStatus(id, b.dataset.st));
   async function carregarFotos() {
@@ -200,6 +204,118 @@ function lightbox(fid) {
   const lb = document.createElement("div"); lb.className = "lb";
   lb.innerHTML = `<img src="/api/foto/${fid}/full">`;
   lb.onclick = () => lb.remove(); document.body.appendChild(lb);
+}
+
+/* ----------------------------------------------------------------- criar / editar O.S. */
+async function viewFormOS(id) {
+  app.innerHTML = topo(id ? "Editar O.S." : "Nova O.S.", false) + `<div class="content"><div class="center"><span class="spin"></span></div></div>`;
+  bindTop();
+  const f = { cliente: null, veiculo: null, km: "", itens: [] };
+  if (id) {
+    let d; try { d = await api("GET", "/api/os/" + id); } catch (e) { if (e.status === 401) { ME = null; return viewLogin(); } return viewLista(); }
+    if (!d.editavel) { toast("O.S. faturada não pode ser editada.", "err"); return viewDetalhe(id); }
+    f.cliente = d.cliente_id ? { id: d.cliente_id, nome: d.cliente } : null;
+    f.veiculo = d.veiculo_id ? { id: d.veiculo_id, placa: d.placa, marca: d.veiculo_marca, modelo: d.veiculo_modelo } : null;
+    f.km = d.km_entrada || "";
+    f.itens = (d.itens || []).map(i => ({ item_catalogo_id: i.item_catalogo_id, descricao: i.descricao, tipo: i.tipo,
+      quantidade: i.quantidade || 1, valor_unitario: i.valor_unitario || 0 }));
+  }
+  const total = () => f.itens.reduce((s, i) => s + (Number(i.quantidade) || 0) * (Number(i.valor_unitario) || 0), 0);
+  function render() {
+    app.innerHTML = topo(id ? "Editar O.S." : "Nova O.S.", false) + `<div class="content">
+      <label class="fl">Cliente *</label>
+      <button class="pick" id="pc">${f.cliente ? esc(f.cliente.nome) : "Selecionar cliente…"}</button>
+      <label class="fl">Veículo</label>
+      <button class="pick" id="pv">${f.veiculo ? esc((f.veiculo.placa || "") + (f.veiculo.marca ? " · " + f.veiculo.marca + " " + (f.veiculo.modelo || "") : "")) : "Selecionar veículo (opcional)…"}</button>
+      <label class="fl">KM de entrada</label>
+      <input id="km" class="inp" inputmode="numeric" value="${esc(f.km)}" placeholder="Ex.: 45000">
+      <div class="sec-t">Serviços e produtos</div>
+      <div id="itens"></div>
+      <button class="btn ghost" id="addi" style="margin-top:8px">+ Adicionar item</button>
+      <div class="tot" style="margin-top:14px"><span>Total</span><span id="tot">${brl(total())}</span></div>
+      <button class="btn" id="save" style="margin-top:16px">${id ? "Salvar alterações" : "Criar O.S."}</button>
+    </div>`;
+    bindTop();
+    renderItens();
+    $("#pc").onclick = escolherCliente;
+    $("#pv").onclick = escolherVeiculo;
+    $("#km").oninput = e => { f.km = e.target.value; };
+    $("#addi").onclick = adicionarItem;
+    $("#save").onclick = salvar;
+  }
+  function renderItens() {
+    const c = $("#itens"); if (!c) return;
+    if (!f.itens.length) { c.innerHTML = `<div class="muted small">Nenhum item ainda. Toque em “Adicionar item”.</div>`; return; }
+    c.innerHTML = f.itens.map((i, idx) => `<div class="it-edit" data-i="${idx}">
+      <div class="grow"><div>${esc(i.descricao)}</div>
+        <div class="it-ctrl"><label>Qtd</label><input class="iq" inputmode="decimal" value="${esc(i.quantidade)}">
+          <label>R$</label><input class="iv" inputmode="decimal" value="${esc(i.valor_unitario)}"></div></div>
+      <button class="it-del" aria-label="Remover">✕</button></div>`).join("");
+    c.querySelectorAll(".it-edit").forEach(row => {
+      const idx = +row.dataset.i;
+      const upd = () => { const t = $("#tot"); if (t) t.textContent = brl(total()); };
+      row.querySelector(".iq").oninput = e => { f.itens[idx].quantidade = e.target.value; upd(); };
+      row.querySelector(".iv").oninput = e => { f.itens[idx].valor_unitario = e.target.value; upd(); };
+      row.querySelector(".it-del").onclick = () => { f.itens.splice(idx, 1); renderItens(); upd(); };
+    });
+  }
+  function escolherCliente() {
+    pickSheet("Cliente", q => api("GET", "/api/clientes" + qs({ q })), c => c.nome + (c.telefone ? " · " + c.telefone : ""),
+      c => { f.cliente = { id: c.id, nome: c.nome }; f.veiculo = null; render(); });
+  }
+  function escolherVeiculo() {
+    if (!f.cliente) { toast("Escolha o cliente primeiro.", "err"); return; }
+    pickSheet("Veículo", () => api("GET", "/api/veiculos" + qs({ cliente_id: f.cliente.id })),
+      v => (v.placa || "") + (v.marca ? " · " + v.marca + " " + (v.modelo || "") : ""),
+      v => { f.veiculo = v; render(); }, true);
+  }
+  function adicionarItem() {
+    pickSheet("Produto / Serviço", q => api("GET", "/api/produtos" + qs({ q })), p => p.nome + " · " + brl(p.preco),
+      p => { f.itens.push({ item_catalogo_id: p.id, descricao: p.nome, tipo: p.tipo, quantidade: 1, valor_unitario: p.preco || 0 });
+        renderItens(); const t = $("#tot"); if (t) t.textContent = brl(total()); });
+  }
+  async function salvar() {
+    if (!f.cliente) { toast("Selecione o cliente.", "err"); return; }
+    const payload = { cliente_id: f.cliente.id, veiculo_id: f.veiculo ? f.veiculo.id : null, km_entrada: f.km, itens: f.itens };
+    toast(id ? "Salvando…" : "Criando…");
+    try {
+      if (id) { await api("POST", "/api/os/" + id + "/editar", payload); toast("O.S. salva ✓", "ok"); viewDetalhe(id); }
+      else { const r = await api("POST", "/api/os", payload); toast("O.S. criada ✓", "ok"); viewDetalhe(r.id); }
+    } catch (e) { if (e.status === 401) { ME = null; return viewLogin(); } toast(e.message || "Não foi possível salvar.", "err"); }
+  }
+  render();
+}
+
+/* picker genérico em sheet (busca no servidor + lista para tocar) */
+function pickSheet(titulo, buscar, rotulo, onPick, semBusca) {
+  const sheet = document.createElement("div");
+  sheet.className = "sheet-bg";
+  sheet.innerHTML = `<div class="sheet"><div class="sheet-h"><b>${esc(titulo)}</b><button class="ib" id="x">✕</button></div>
+    <div class="sheet-b">
+      ${semBusca ? "" : `<input id="bq" class="inp" placeholder="Buscar…" autocapitalize="characters">`}
+      <div id="res" style="margin-top:10px"></div></div></div>`;
+  document.body.appendChild(sheet);
+  const fechar = () => sheet.remove();
+  sheet.querySelector("#x").onclick = fechar;
+  sheet.addEventListener("click", e => { if (e.target === sheet) fechar(); });
+  const res = sheet.querySelector("#res");
+  let t;
+  async function carregar(q) {
+    res.innerHTML = `<div class="center"><span class="spin"></span></div>`;
+    try {
+      const items = await buscar(q);
+      if (!items.length) { res.innerHTML = `<div class="muted small" style="padding:10px">Nada encontrado.</div>`; return; }
+      res.innerHTML = "";
+      items.forEach(it => {
+        const r = document.createElement("button"); r.className = "pick-row"; r.textContent = rotulo(it);
+        r.onclick = () => { onPick(it); fechar(); };
+        res.appendChild(r);
+      });
+    } catch (e) { if (e.status === 401) { fechar(); ME = null; return viewLogin(); } res.innerHTML = `<div class="muted small" style="padding:10px">${esc(e.message)}</div>`; }
+  }
+  const bq = sheet.querySelector("#bq");
+  if (bq) { bq.oninput = () => { clearTimeout(t); t = setTimeout(() => carregar(bq.value.trim()), 300); }; setTimeout(() => bq.focus(), 60); }
+  carregar("");
 }
 
 /* ----------------------------------------------------------------- captura de foto */

@@ -209,6 +209,42 @@ def test_mecanico_nao_fatura_pelo_endpoint(srv):
     assert req("POST", f"/api/os/{osd['id']}/faturar", {"forma_pagamento": "PIX"})[0] == 403
 
 
+def test_criar_e_editar_os(srv):
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "SUPORTE", "senha": "1234567890"})
+    st, cls = req("GET", "/api/clientes")
+    assert st == 200 and any(c["nome"] == "Cliente A" for c in cls)
+    cid = next(c["id"] for c in cls if c["nome"] == "Cliente A")
+    assert req("GET", "/api/produtos")[0] == 200  # catálogo de exemplo do seed
+    st, nova = req("POST", "/api/os", {"cliente_id": cid, "km_entrada": "10",
+                                       "itens": [{"descricao": "Serviço X", "quantidade": 1, "valor_unitario": 80}]})
+    assert st == 200 and nova["numero"].startswith("OS-")
+    nid = nova["id"]
+    st, det = req("GET", f"/api/os/{nid}")
+    assert det["total"] == 80 and det["editavel"]
+    # editar: adiciona um item
+    st, _ = req("POST", f"/api/os/{nid}/editar", {"cliente_id": cid, "km_entrada": "10",
+        "itens": [{"descricao": "Serviço X", "quantidade": 1, "valor_unitario": 80},
+                  {"descricao": "Peça Y", "quantidade": 2, "valor_unitario": 25}]})
+    assert st == 200
+    assert req("GET", f"/api/os/{nid}")[1]["total"] == 130
+    # depois de faturada, não pode editar
+    req("POST", f"/api/os/{nid}/status", {"status": "Em Execução"})
+    req("POST", f"/api/os/{nid}/status", {"status": "Concluída"})
+    req("POST", f"/api/os/{nid}/faturar", {"forma_pagamento": "Dinheiro"})
+    assert req("POST", f"/api/os/{nid}/editar", {"cliente_id": cid, "itens": []})[0] == 400
+
+
+def test_criar_os_exige_modulo_os(srv):
+    con = srv["con"]
+    p = repo.papeis.create(con, {"nome": "SoDash3", "modulos": ["dashboard"]})
+    repo.usuarios.create(con, {"login": "LIA", "senha": "1234", "papel_id": p["id"]})
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "LIA", "senha": "1234"})
+    assert req("GET", "/api/clientes")[0] == 403
+    assert req("POST", "/api/os", {"cliente_id": 1, "itens": []})[0] == 403
+
+
 def test_reset_senha_derruba_sessao_mobile(srv):
     con = srv["con"]
     req = _cliente(srv["porta"])

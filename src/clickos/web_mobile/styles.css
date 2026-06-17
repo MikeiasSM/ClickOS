@@ -99,6 +99,20 @@ button{font-family:inherit;cursor:pointer}
 select.inp{appearance:none;-webkit-appearance:none}
 textarea.inp{resize:vertical}
 
+/* formulário de O.S. (pickers e itens editáveis) */
+.pick{width:100%;text-align:left;padding:13px;border:1px solid var(--line);border-radius:11px;background:#0b1322;
+  color:var(--ink);font-size:15px}
+.pick:active{border-color:var(--blue)}
+.pick-row{display:block;width:100%;text-align:left;padding:13px;border:0;border-bottom:1px solid var(--line);
+  background:transparent;color:var(--ink);font-size:15px}
+.pick-row:active{background:rgba(255,255,255,.05)}
+.it-edit{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.it-edit .it-ctrl{display:flex;align-items:center;gap:6px;margin-top:7px}
+.it-edit .it-ctrl label{font-size:12px;color:var(--muted)}
+.it-edit .it-ctrl input{width:64px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#0b1322;
+  color:var(--ink);font-size:14px;text-align:center}
+.it-del{flex:0 0 auto;background:transparent;border:0;color:var(--red);font-size:16px;padding:6px 8px;line-height:1}
+
 /* toast */
 #toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translateX(-50%);
   z-index:60;display:flex;flex-direction:column;gap:8px;pointer-events:none;width:90%;max-width:420px}
