@@ -301,8 +301,13 @@ def _seed_papeis(con: sqlite3.Connection) -> None:
             con.execute("INSERT INTO papeis(nome, descricao, sistema, criado_em) VALUES (?,?,1,?)",
                         (nome, descricao, datetime.now().isoformat(timespec="seconds")))
             pid = con.execute("SELECT id FROM papeis WHERE nome=? COLLATE NOCASE", (nome,)).fetchone()[0]
-            con.executemany("INSERT OR IGNORE INTO papel_modulos(papel_id, modulo) VALUES (?,?)",
-                            [(pid, m) for m in mods])
+        else:
+            pid = existe[0]
+        # módulos dos papéis do sistema são canônicos: re-afirma a cada início (auto-cura contra lockout)
+        con.execute("UPDATE papeis SET sistema=1 WHERE id=?", (pid,))
+        con.execute("DELETE FROM papel_modulos WHERE papel_id=?", (pid,))
+        con.executemany("INSERT OR IGNORE INTO papel_modulos(papel_id, modulo) VALUES (?,?)",
+                        [(pid, m) for m in mods])
     # instalações existentes: dá Administrador a quem ainda não tem papel (evita travar o acesso)
     admin = con.execute("SELECT id FROM papeis WHERE nome='Administrador'").fetchone()
     if admin is not None:

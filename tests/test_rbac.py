@@ -1,6 +1,6 @@
 import pytest
 
-from clickos import db, repositories as repo
+from clickos import db, repositories as repo, services
 from clickos.api import Api
 
 
@@ -151,3 +151,95 @@ def test_api_override_bloqueia_faturar_para_atendente(tmp_path):
     assert r["ok"] is False and r.get("negado")
     # mas mudar para 'Em Execução' (módulo os) continua permitido
     assert api.set_status({"id": osd["id"], "status": "Em Execução"})["ok"]
+
+
+# ----------------------------------------------------------------- correções da revisão adversarial
+def _os_item():
+    return [{"descricao": "Serviço", "quantidade": 1, "valor_unitario": 100}]
+
+
+def test_save_documento_faturar_bloqueado_sem_permissao(tmp_path):
+    # achado #1: faturar via save_documento (status='Faturada') deve exigir 'faturar'
+    con = _con(tmp_path)
+    repo.usuarios.create(con, {"login": "MEC", "senha": "1234", "papel_id": _papel_id(con, "Mecânico")})
+    cli = repo.clientes.create(con, {"nome": "C"})
+    api = Api(con); _login(api, "MEC", "1234")
+    r = api.save_documento({"tipo": "os", "status": "Faturada", "cliente_id": cli["id"],
+                            "km_entrada": "1", "itens": _os_item()})
+    assert r["ok"] is False and r.get("negado")  # criar já faturada: negado
+    r2 = api.save_documento({"tipo": "os", "cliente_id": cli["id"], "km_entrada": "1", "itens": _os_item()})
+    assert r2["ok"]  # criar O.S. normal: permitido (tem 'os')
+    r3 = api.save_documento({"id": r2["data"]["id"], "tipo": "os", "status": "Faturada",
+                             "cliente_id": cli["id"], "km_entrada": "1", "itens": _os_item()})
+    assert r3["ok"] is False and r3.get("negado")  # editar para Faturada: negado
+
+
+def test_papel_sistema_modulos_imutaveis(tmp_path):
+    # achado #2: módulos de papel do sistema não mudam por update
+    con = _con(tmp_path)
+    admin = _papel_id(con, "Administrador")
+    antes = set(repo.papeis.get(con, admin)["modulos"])
+    repo.papeis.update(con, admin, {"modulos": ["dashboard"]})
+    assert set(repo.papeis.get(con, admin)["modulos"]) == antes
+
+
+def test_seed_restaura_modulos_de_papel_sistema(tmp_path):
+    # achado #2: reconectar auto-cura módulos de papel do sistema esvaziados
+    caminho = tmp_path / "heal.db"
+    con = db.connect(caminho)
+    admin = _papel_id(con, "Administrador")
+    con.execute("DELETE FROM papel_modulos WHERE papel_id=?", (admin,)); con.commit()
+    con.close()
+    con2 = db.connect(caminho)
+    assert set(repo.papeis.get(con2, admin)["modulos"]) == set(db.MODULO_KEYS)
+
+
+def test_guarda_ultimo_admin(tmp_path):
+    # achado #3: não permitir tirar 'usuarios' do último administrador
+    con = _con(tmp_path)
+    dono = repo.usuarios.create(con, {"login": "DONO", "senha": "1234", "papel_id": _papel_id(con, "Administrador")})
+    api = Api(con); _login(api, "DONO", "1234")
+    base = {"id": dono["id"], "login": "DONO", "ativo": 1, "papel_id": _papel_id(con, "Administrador")}
+    r = api.save_usuario({**base, "overrides": {"usuarios": 0}})
+    assert r["ok"] is False  # único admin não pode se auto-bloquear
+    repo.usuarios.create(con, {"login": "ADM2", "senha": "1234", "papel_id": _papel_id(con, "Administrador")})
+    r2 = api.save_usuario({**base, "overrides": {"usuarios": 0}})
+    assert r2["ok"]  # havendo outro admin, é permitido
+
+
+def test_definir_senha_devolve_modulos(tmp_path):
+    # achado #4: definir_senha (1ª troca) precisa devolver 'modulos' (senão a UI fica em branco)
+    con = _con(tmp_path)
+    u = repo.usuarios.create(con, {"login": "NINA", "senha": "abcd", "papel_id": _papel_id(con, "Atendente")})
+    adm = Api(con); _login(adm, "SUPORTE", "1234567890")
+    assert adm.reset_senha({"alvo_id": u["id"], "senha": "1234567890"})["ok"]
+    api = Api(con)
+    lg = api.login({"login": "NINA", "senha": services.SENHA_RESET})
+    assert lg["ok"] and lg["data"]["must_change"]
+    dn = api.definir_senha({"id": u["id"], "nova_senha": "novasenha"})
+    assert dn["ok"] and "modulos" in dn["data"] and "orcamentos" in dn["data"]["modulos"]
+
+
+def test_fotos_exigem_modulo_os(tmp_path):
+    # achado #5: endpoints mutantes de fotos exigem 'os'
+    con = _con(tmp_path)
+    p = repo.papeis.create(con, {"nome": "SoDash", "modulos": ["dashboard"]})
+    repo.usuarios.create(con, {"login": "ZE", "senha": "1234", "papel_id": p["id"]})
+    cli = repo.clientes.create(con, {"nome": "C"})
+    osd = repo.documentos.create(con, {"tipo": "os", "data_abertura": "2026-06-17",
+                                       "cliente_id": cli["id"], "km_entrada": "1", "itens": []})
+    fid = repo.fotos.add_processado(con, osd["id"], b"full", b"thumb", "desktop")
+    api = Api(con); _login(api, "ZE", "1234")
+    r = api.delete_foto(fid)
+    assert r["ok"] is False and r.get("negado")
+    assert api.foto_sessao(osd["id"])["ok"] is False
+
+
+def test_parametros_globais_exigem_modulo(tmp_path):
+    # achado #7: add_cidade/add_valor/delete_valor exigem módulo de cadastro
+    con = _con(tmp_path)
+    p = repo.papeis.create(con, {"nome": "SoDash2", "modulos": ["dashboard"]})
+    repo.usuarios.create(con, {"login": "BIA", "senha": "1234", "papel_id": p["id"]})
+    api = Api(con); _login(api, "BIA", "1234")
+    assert api.add_cidade({"nome": "X", "uf": "BA"})["ok"] is False
+    assert api.add_valor({"tipo": "marca", "valor": "Y"})["ok"] is False

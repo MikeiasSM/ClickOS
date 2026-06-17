@@ -561,6 +561,22 @@ class _Usuarios:
         return {m: p for m, p in con.execute(
             "SELECT modulo, permitido FROM usuario_modulos WHERE usuario_id=?", (uid,))}
 
+    def permissoes_simulada(self, con, papel_id, overrides, is_suporte=False):
+        """Calcula os módulos efetivos para um papel + exceções DADOS (sem ler/gravar o usuário).
+        Usado para validar uma mudança antes de persistir (ex.: guarda de último administrador)."""
+        if is_suporte:
+            return list(dbmod.MODULO_KEYS)
+        base = set()
+        if papel_id:
+            base = {x[0] for x in con.execute(
+                "SELECT modulo FROM papel_modulos WHERE papel_id=?", (papel_id,))}
+        for modulo, permitido in (overrides or {}).items():
+            if permitido:
+                base.add(modulo)
+            else:
+                base.discard(modulo)
+        return [k for k in dbmod.MODULO_KEYS if k in base]
+
     def set_overrides(self, con, uid, overrides):
         """Substitui as exceções do usuário. `overrides` = {modulo: 1|0}; vazio limpa todas."""
         validos = set(dbmod.MODULO_KEYS)
@@ -805,7 +821,7 @@ class _Papeis:
         desc = data.get("descricao")
         con.execute("UPDATE papeis SET nome=?, descricao=? WHERE id=?",
                     (nome, desc if desc is not None else row["descricao"], pid))
-        if "modulos" in data:
+        if "modulos" in data and not row["sistema"]:  # módulos dos papéis do sistema são fixos (evita lockout)
             self._set_modulos(con, pid, data.get("modulos"))
         con.commit()
         return self.get(con, pid)

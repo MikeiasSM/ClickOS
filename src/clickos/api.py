@@ -83,6 +83,34 @@ class Api:
             tipo = (doc or {}).get("tipo")
         return "orcamentos" if tipo == "orcamento" else "os"
 
+    def _ha_admin_usuarios(self, uid_alt=None, papel_alt=None, overrides_alt=None, ativo_alt=None,
+                           role_id=None, role_modulos=None):
+        """True se, APÓS a mudança proposta, ao menos um usuário ATIVO não-SUPORTE mantém o módulo
+        'usuarios'. Usado para impedir o lockout do último administrador (o SUPORTE não conta:
+        o lojista pode não ter a senha mestre)."""
+        for u in repo.usuarios.list(self.con):
+            if u["is_suporte"]:
+                continue
+            ativo = u["ativo"]
+            if uid_alt is not None and u["id"] == uid_alt and ativo_alt is not None:
+                ativo = ativo_alt
+            if not ativo:
+                continue
+            if uid_alt is not None and u["id"] == uid_alt:
+                mods = repo.usuarios.permissoes_simulada(self.con, papel_alt, overrides_alt, False)
+            elif role_id is not None and u["papel_id"] == role_id:
+                base = set(role_modulos or [])
+                for m, p in repo.usuarios.overrides(self.con, u["id"]).items():
+                    base.add(m) if p else base.discard(m)
+                mods = [k for k in dbmod.MODULO_KEYS if k in base]
+            else:
+                mods = repo.usuarios.permissoes(self.con, u["id"], False)
+            if "usuarios" in mods:
+                return True
+        return False
+
+    _ERRO_ULTIMO_ADMIN = "É necessário que ao menos um administrador mantenha o acesso a Usuários e Permissões."
+
     def _audit(self, acao, entidade=None, entidade_id=None, descricao="", detalhes=None, usuario=None):
         """Registra um evento de auditoria sem nunca quebrar a ação principal (já efetivada)."""
         try:
@@ -121,6 +149,7 @@ class Api:
     @_api
     def add_cidade(self, payload):
         """Cadastra uma cidade nova; UF deve ser uma das existentes (nunca um novo estado)."""
+        self._requer("pessoas")  # cidade é usada no endereço de pessoas/empresa
         nome = (payload.get("nome") or "").strip()
         uf = (payload.get("uf") or "").strip().upper()
         if not nome:
@@ -135,6 +164,7 @@ class Api:
     @_api
     def add_valor(self, payload):
         """Cadastra uma marca/cor/combustível personalizado (autocomplete persistente)."""
+        self._requer("veiculos")  # marca/cor/combustível são atributos de veículo
         tipo = (payload.get("tipo") or "").strip().lower()
         valor = (payload.get("valor") or "").strip()
         if tipo not in ("marca", "cor", "combustivel"):
@@ -150,6 +180,7 @@ class Api:
     @_api
     def delete_valor(self, payload):
         """Remove um valor de autocomplete cadastrado (marca/cor/combustível)."""
+        self._requer("veiculos")
         tipo = (payload.get("tipo") or "").strip().lower()
         valor = (payload.get("valor") or "").strip()
         if not valor:
@@ -273,12 +304,16 @@ class Api:
         if payload.get("id"):
             antes = repo.documentos.get(self.con, payload["id"])
             self._requer(self._modulo_doc(tipo=(antes or {}).get("tipo") or payload.get("tipo")))
+            if payload.get("status") == "Faturada" and (antes or {}).get("status") != "Faturada":
+                self._requer("faturar")  # faturar pelo editor exige a mesma permissão do set_status
             saved = repo.documentos.update(self.con, payload["id"], payload, stamp=_stamp())
             self._audit("editar", "documento", saved["id"],
                         f"{_doc_label(saved)} {saved['numero']} editado",
                         {"diff": audit.diff(antes, saved)})
             return saved
         self._requer(self._modulo_doc(tipo=payload.get("tipo")))
+        if payload.get("status") == "Faturada":  # lançar O.S. já faturada exige a permissão 'faturar'
+            self._requer("faturar")
         saved = repo.documentos.create(self.con, payload, stamp=_stamp())
         self._audit("criar", "documento", saved["id"],
                     f"{_doc_label(saved)} {saved['numero']} criado", {"snapshot": audit.snapshot(saved)})
@@ -396,7 +431,7 @@ class Api:
     @_api
     def add_fotos_desktop(self, doc_id):
         """Adiciona fotos pelo diálogo nativo (multi-seleção)."""
-        self._sessao()
+        self._requer("os")
         res = self._win().create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=True,
             file_types=("Imagens (*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif)", "Todos os arquivos (*.*)"))
@@ -418,7 +453,7 @@ class Api:
 
     @_api
     def delete_foto(self, foto_id):
-        self._sessao()
+        self._requer("os")
         doc_id = repo.fotos.doc_de(self.con, foto_id)
         if doc_id is not None:  # exclusão bloqueada quando a O.S. está faturada
             st = self.con.execute("SELECT status FROM documentos WHERE id=?", (doc_id,)).fetchone()
@@ -431,7 +466,7 @@ class Api:
     @_api
     def foto_sessao(self, doc_id):
         """Gera o link + QR para anexar fotos a esta O.S. pelo celular na rede local."""
-        self._sessao()
+        self._requer("os")
         if not mobile_server.disponivel():
             raise ValueError("O acesso por celular não está disponível (servidor não iniciou).")
         tok = mobile_server.criar_token(doc_id, usuario_id=(self.usuario or {}).get("id"))
@@ -637,6 +672,12 @@ class Api:
             alvo = repo.usuarios.get(self.con, payload["id"])
             if alvo and alvo.get("is_suporte") and not sess.get("is_suporte"):
                 raise ValueError("Apenas o SUPORTE pode editar a conta SUPORTE.")
+            if alvo and not alvo.get("is_suporte"):  # guarda de último administrador
+                papel_alt = payload["papel_id"] if "papel_id" in payload else alvo.get("papel_id")
+                overrides_alt = payload["overrides"] if "overrides" in payload else repo.usuarios.overrides(self.con, payload["id"])
+                if not self._ha_admin_usuarios(uid_alt=payload["id"], papel_alt=papel_alt,
+                                               overrides_alt=overrides_alt, ativo_alt=payload.get("ativo")):
+                    raise services.EmVinculo(self._ERRO_ULTIMO_ADMIN)
             saved = repo.usuarios.update(self.con, payload["id"], payload, stamp=_stamp())
             det = {"diff": audit.diff(alvo, saved)}
             if (payload.get("senha") or "").strip():
@@ -672,6 +713,9 @@ class Api:
         self._requer("usuarios")
         if payload.get("id"):
             antes = repo.papeis.get(self.con, payload["id"])
+            if antes and not antes.get("sistema") and "modulos" in payload:  # guarda de último administrador
+                if not self._ha_admin_usuarios(role_id=payload["id"], role_modulos=payload.get("modulos")):
+                    raise services.EmVinculo(self._ERRO_ULTIMO_ADMIN)
             saved = repo.papeis.update(self.con, payload["id"], payload)
             self._audit("editar", "papel", saved["id"], f"Papel {saved.get('nome', '')} alterado",
                         {"diff": audit.diff(antes, saved)})
@@ -694,6 +738,9 @@ class Api:
     def delete_usuario(self, uid):
         self._requer("usuarios")
         alvo = repo.usuarios.get(self.con, uid)
+        if alvo and not alvo.get("is_suporte"):  # não excluir o último administrador
+            if not self._ha_admin_usuarios(uid_alt=uid, ativo_alt=False):
+                raise services.EmVinculo(self._ERRO_ULTIMO_ADMIN)
         repo.usuarios.delete(self.con, uid)
         self._audit("excluir", "usuario", uid, f"Usuário {(alvo or {}).get('login', uid)} excluído",
                     {"snapshot": audit.snapshot(alvo)})
@@ -728,7 +775,10 @@ class Api:
             raise ValueError("Troca de senha não solicitada.")
         saved = repo.usuarios.definir_senha(self.con, sess["id"], payload.get("nova_senha") or "")
         self._audit("parametro", "usuario", sess["id"], f"Senha alterada pelo usuário {sess.get('login', '')}")
-        return saved
+        # devolve os módulos (como o login) para a UI não perder as permissões no fluxo de 1ª troca
+        modulos = repo.usuarios.permissoes(self.con, sess["id"], sess.get("is_suporte"))
+        self.usuario["modulos"] = set(modulos)
+        return {**saved, "modulos": modulos}
 
     @_api
     def pick_image(self):

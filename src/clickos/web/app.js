@@ -414,7 +414,15 @@ function aplicarPermissoes() {
   if (cfg) cfg.style.display = (pode("configuracoes") || pode("usuarios")) ? "" : "none";
 }
 async function setView(view) {
-  if (VIEW_MOD[view] && !pode(VIEW_MOD[view])) { const alvo = primeiraView(); if (alvo === view) return; toast("Você não tem permissão para acessar este módulo.", "err"); view = alvo; }
+  if (VIEW_MOD[view] && !pode(VIEW_MOD[view])) {
+    const alvo = primeiraView();
+    if (alvo !== view) { toast("Você não tem permissão para acessar este módulo.", "err"); view = alvo; }
+    else {  // nenhuma view de módulo é permitida: cai nas Configurações ou mostra um estado vazio
+      const mr0 = document.getElementById("modal-root"); if (mr0) mr0.innerHTML = "";
+      if (pode("configuracoes") || pode("usuarios")) return viewConfiguracoes();
+      setActive(null); return render(`<div class="empty">Nenhum módulo liberado para o seu acesso. Fale com o administrador.</div>`);
+    }
+  }
   setActive(view); const mr = document.getElementById("modal-root"); if (mr) mr.innerHTML = "";
   try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); }
 }
@@ -1877,9 +1885,9 @@ async function delPapel(p) {
 function formPapel(p) {
   p = p || { modulos: [], sistema: 0 };
   const mods = B.modulos || [];
-  const checks = mods.map(mm => `<label class="mod-check"><input type="checkbox" value="${mm.chave}" ${(p.modulos || []).includes(mm.chave) ? "checked" : ""}><span>${esc(mm.rotulo)}</span></label>`).join("");
+  const checks = mods.map(mm => `<label class="mod-check"><input type="checkbox" value="${mm.chave}" ${(p.modulos || []).includes(mm.chave) ? "checked" : ""} ${p.sistema ? "disabled" : ""}><span>${esc(mm.rotulo)}</span></label>`).join("");
   const m = h(`<div class="modal" style="width:540px"><button class="close">×</button><h3>${p.id ? "Editar" : "Novo"} Papel</h3>
-    ${p.sistema ? '<p class="muted small" style="margin:0 0 12px">Papel padrão do sistema: o nome é fixo, mas você pode ajustar os módulos.</p>' : ""}
+    ${p.sistema ? '<p class="muted small" style="margin:0 0 12px">Papel padrão do sistema: nome e módulos são fixos. Para um conjunto diferente, crie um papel novo.</p>' : ""}
     <div class="field"><label>Nome *</label><input id="pnome" value="${esc(p.nome || "")}" ${p.sistema ? "readonly" : ""}></div>
     <div class="field"><label>Descrição</label><input id="pdesc" value="${esc(p.descricao || "")}"></div>
     <div class="field"><label>Módulos liberados</label><div class="mod-grid">${checks}</div></div>
@@ -1889,8 +1897,9 @@ function formPapel(p) {
   m.querySelector("#sv").onclick = async () => {
     const nome = val("#pnome", m);
     if (!nome) { toast("Informe o nome do papel", "err"); return; }
-    const modulos = Array.from(m.querySelectorAll(".mod-grid input:checked")).map(c => c.value);
-    try { await api("save_papel", { id: p.id, nome, descricao: val("#pdesc", m), modulos }); toast("Papel salvo", "ok"); bg.remove(); viewConfiguracoes("papeis"); } catch (e) {}
+    const payload = { id: p.id, nome, descricao: val("#pdesc", m) };
+    if (!p.sistema) payload.modulos = Array.from(m.querySelectorAll(".mod-grid input:checked")).map(c => c.value);
+    try { await api("save_papel", payload); toast("Papel salvo", "ok"); bg.remove(); viewConfiguracoes("papeis"); } catch (e) {}
   };
 }
 
@@ -1973,7 +1982,7 @@ function showLogin(opts) {
         if (r && r.ok === false) { err.textContent = r.erro || "Login ou senha inválidos."; pass.value = ""; pass.focus(); bt.disabled = false; return; }
         ov.remove();
         let u = r.data;
-        if (u && u.must_change) u = await trocaSenhaObrigatoria(u);  // 1º login após redefinição
+        if (u && u.must_change) { const novo = await trocaSenhaObrigatoria(u); u = { ...u, ...novo }; }  // 1º login após redefinição (preserva modulos)
         resolve(u);
       } catch (e) { err.textContent = "Erro ao entrar. Tente novamente."; bt.disabled = false; }
     };
