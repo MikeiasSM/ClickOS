@@ -2141,6 +2141,19 @@ async function refreshSug() { try { SUG = await api("sugestoes"); } catch (e) {}
 function bindNav() {
   document.querySelectorAll(".menu a").forEach(a => a.onclick = () => setView(a.dataset.view));
   const cfg = document.getElementById("btn-config"); if (cfg) cfg.onclick = () => viewConfiguracoes();
+  const mob = document.getElementById("btn-mobile"); if (mob) mob.onclick = abrirAppCelular;
+}
+async function abrirAppCelular() {
+  let s; try { s = await api("app_sessao"); } catch (e) { return; }
+  const mm = h(`<div class="modal" style="width:430px;text-align:center"><button class="close">×</button>
+    <h3>Acessar pelo celular</h3>
+    <p class="muted small">Na mesma rede Wi‑Fi, aponte a câmera do celular para o QR Code (ou digite o endereço no navegador) e entre com o seu usuário e senha.</p>
+    <div class="qr-box">${s.qr_svg}</div>
+    <div class="qr-url">${esc(s.url)}</div>
+    <p class="muted small">No celular, dá para “Instalar” o app na tela inicial pelo menu do navegador.</p>
+    <div class="mt"><button class="btn btn-primary" id="qr-ok">Fechar</button></div></div>`);
+  const bg = openModal(mm);
+  mm.querySelector(".close").onclick = () => bg.remove(); mm.querySelector("#qr-ok").onclick = () => bg.remove();
 }
 async function start() {
   window.__p = "begin";

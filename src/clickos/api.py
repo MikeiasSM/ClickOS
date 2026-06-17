@@ -475,6 +475,16 @@ class Api:
                     {"documento_id": doc_id})
         return {"url": url, "qr_svg": _qr_svg(url), "expira_horas": mobile_server.TTL // 3600}
 
+    @_api
+    def app_sessao(self):
+        """Link + QR do app no celular (abre na tela de login). Não carrega token: exige login."""
+        self._sessao()
+        if not mobile_server.disponivel():
+            raise ValueError("O acesso por celular não está disponível (servidor não iniciou).")
+        url = mobile_server.app_url()
+        self._audit("criar", None, None, "Link do app para celular gerado", {"url": url})
+        return {"url": url, "qr_svg": _qr_svg(url)}
+
     # ----------------------------------------------------------------- clientes
     @_api
     def list_clientes(self, q=None):

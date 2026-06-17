@@ -17,19 +17,32 @@ def _jpeg():
     return buf.getvalue()
 
 
+def _parar_servidor():
+    s = mobile_server._SERVER
+    if s is not None:
+        try:
+            s.shutdown()
+            s.server_close()
+        except Exception:
+            pass
+    mobile_server._SERVER = None
+    mobile_server.PORTA = None
+
+
 @pytest.fixture
 def servidor(tmp_path):
     caminho = tmp_path / "srv.db"
-    # reseta o estado de módulo (singleton) entre testes
-    mobile_server._SERVER = None
-    mobile_server.PORTA = None
+    _parar_servidor()  # encerra servidor vazado de outro teste (evita colisão de porta no Windows)
+    mobile_server._SESSOES.clear()
+    mobile_server._TOKENS.clear()
     porta, ip = mobile_server.iniciar(con_factory=lambda: db.connect(caminho))
     assert porta, "servidor não subiu"
     con = db.connect(caminho)
     c = repo.clientes.create(con, {"nome": "João"})
     osd = repo.documentos.create(con, {"tipo": "os", "data_abertura": "2026-06-15",
                                        "cliente_id": c["id"], "km_entrada": "1", "itens": []})
-    return {"porta": porta, "con": con, "doc_id": osd["id"], "numero": osd["numero"]}
+    yield {"porta": porta, "con": con, "doc_id": osd["id"], "numero": osd["numero"]}
+    _parar_servidor()
 
 
 def _get(url):

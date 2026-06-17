@@ -1,8 +1,11 @@
-"""Servidor HTTP embarcado (stdlib) para captura de fotos pelo celular na rede local.
+"""Servidor HTTP embarcado (stdlib) para acesso pelo celular na rede local.
 
-O desktop gera um token por O.S. (escopo de 1 documento, expiry); o celular abre
-http://<ip-lan>:<porta>/m/<token> (sem login) e envia fotos pela câmera. Usa uma
-conexão SQLite PRÓPRIA (separada da conexão do bridge pywebview).
+Dois canais, ambos na mesma conexão SQLite PRÓPRIA (separada da conexão do bridge pywebview):
+
+1. Captura de fotos por O.S. SEM login: o desktop gera um token por O.S. (escopo de 1
+   documento, expiry) e o celular abre http://<ip>:<porta>/m/<token>.
+2. App essencial COM login: http://<ip>:<porta>/app/ — SPA enxuta (consulta de O.S.,
+   fotos e mudança de status) com sessão por aparelho (cookie) e RBAC por requisição.
 """
 import base64
 import json
@@ -11,8 +14,11 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from . import audit
+from . import db
+from . import paths
 from . import repositories as repo
 from . import services
 
@@ -20,14 +26,23 @@ from . import services
 PORTA = None
 IP = None
 _SERVER = None
-_TOKENS = {}                 # token -> {"doc_id": int, "exp": epoch, "uid": int|None}
-_LOCK = threading.Lock()     # protege _TOKENS
+_TOKENS = {}                 # token de foto -> {"doc_id": int, "exp": epoch, "uid": int|None}
+_SESSOES = {}                # sid -> {"uid","login","is_suporte","modulos":set,"exp"}
+_LOCK = threading.Lock()     # protege _TOKENS e _SESSOES
 _DB_LOCK = threading.Lock()  # serializa o acesso à conexão do servidor entre requisições
 TTL = 12 * 3600
+SESSAO_TTL = 8 * 3600
 PORTAS = [8732, 8733, 8734, 8080, 0]  # 0 = porta efêmera do SO como último recurso
 
+_MIME = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
+         ".css": "text/css; charset=utf-8", ".webmanifest": "application/manifest+json; charset=utf-8",
+         ".json": "application/json; charset=utf-8", ".png": "image/png", ".svg": "image/svg+xml",
+         ".ico": "image/x-icon"}
+_FLUXO = {"Aberta": ["Em Execução"], "Em Execução": ["Concluída"],
+          "Concluída": ["Faturada"], "Faturada": [], "Cancelada": []}
 
-# ---- tokens ----
+
+# ---- tokens de foto (sem login) ----
 def criar_token(doc_id, usuario_id=None, ttl=TTL):
     tok = secrets.token_urlsafe(16)
     with _LOCK:
@@ -46,12 +61,52 @@ def _resolver(tok):
         return dict(e)
 
 
+# ---- sessões do app (com login) ----
+def _criar_sessao(user, modulos):
+    sid = secrets.token_urlsafe(24)
+    with _LOCK:
+        _SESSOES[sid] = {"uid": user["id"], "login": user["login"], "is_suporte": bool(user["is_suporte"]),
+                         "modulos": set(modulos), "exp": time.time() + SESSAO_TTL}
+    return sid
+
+
+def _sessao_por_sid(sid):
+    if not sid:
+        return None
+    with _LOCK:
+        s = _SESSOES.get(sid)
+        if not s:
+            return None
+        if s["exp"] < time.time():
+            _SESSOES.pop(sid, None)
+            return None
+        return s
+
+
+def _remover_sessao(sid):
+    with _LOCK:
+        _SESSOES.pop(sid, None)
+
+
+def _ler_cookies(raw):
+    out = {}
+    for parte in (raw or "").split(";"):
+        if "=" in parte:
+            k, v = parte.split("=", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
 def disponivel():
     return _SERVER is not None and PORTA is not None
 
 
 def url_para(tok):
     return f"http://{IP}:{PORTA}/m/{tok}"
+
+
+def app_url():
+    return f"http://{IP}:{PORTA}/app/"
 
 
 # ---- rede ----
@@ -66,7 +121,28 @@ def lan_ip():
         s.close()
 
 
-# ---- página mobile (auto-contida, inline) ----
+# ---- payloads do app ----
+def _os_resumo(d):
+    return {"id": d["id"], "numero": d["numero"], "status": d["status"],
+            "cliente": d.get("cliente_nome"), "placa": d.get("veiculo_placa"),
+            "total": d.get("total"), "data_abertura": d.get("data_abertura")}
+
+
+def _os_detalhe(d, fotos, sess):
+    pode_fat = sess["is_suporte"] or "faturar" in sess["modulos"]
+    prox = [st for st in _FLUXO.get(d["status"], []) if st != "Faturada" or pode_fat]
+    return {"id": d["id"], "numero": d["numero"], "status": d["status"],
+            "cliente": d.get("cliente_nome"), "veiculo_marca": d.get("veiculo_marca"),
+            "veiculo_modelo": d.get("veiculo_modelo"), "placa": d.get("veiculo_placa"),
+            "km_entrada": d.get("km_entrada"), "responsavel": d.get("usuario_nome"),
+            "total": d.get("total"),
+            "itens": [{"descricao": i.get("descricao"), "quantidade": i.get("quantidade"),
+                       "valor_liquido": i.get("valor_liquido")} for i in d.get("itens", [])],
+            "fotos": [{"id": f["id"]} for f in fotos],
+            "proximos_status": prox}
+
+
+# ---- página de captura de fotos por token (sem login) ----
 _PAGINA = r"""<!DOCTYPE html><html lang="pt-br"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Fotos · __NUMERO__</title>
@@ -134,57 +210,78 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # silencia o log no stderr
         pass
 
-    def _send(self, code, body=b"", mime="text/plain; charset=utf-8", no_store=False):
+    def _send(self, code, body=b"", mime="text/plain; charset=utf-8", no_store=False, extra=None):
         self.send_response(code)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         if no_store:
             self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or []):
+            self.send_header(k, v)
         self.end_headers()
         if body:
             self.wfile.write(body)
 
-    def _json(self, obj, code=200):
-        self._send(code, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
+    def _json(self, obj, code=200, extra=None):
+        self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
+                   "application/json; charset=utf-8", extra=extra)
 
     def _partes(self):
         path = self.path.split("?", 1)[0]
         return [p for p in path.split("/") if p != ""]
 
+    def _corpo_json(self, limite=25 * 1024 * 1024):
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length <= 0 or length > limite:
+            return None
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            return None
+
+    # ----- sessão -----
+    def _cookie_sid(self):
+        return _ler_cookies(self.headers.get("Cookie", "")).get("sid")
+
+    def _sessao(self):
+        return _sessao_por_sid(self._cookie_sid())
+
+    def _exige(self, modulo=None):
+        s = self._sessao()
+        if s is None:
+            self._json({"erro": "Sessão expirada. Entre novamente."}, 401)
+            return None
+        if modulo and not s["is_suporte"] and modulo not in s["modulos"]:
+            self._json({"erro": "Você não tem permissão para esta ação."}, 403)
+            return None
+        return s
+
+    # ----- estáticos do app mobile -----
+    def _estatico(self, rel):
+        rel = rel or ["index.html"]
+        if any((p in ("", "..") or "\\" in p) for p in rel):
+            return self._send(404, b"nao encontrado")
+        caminho = paths.asset("web_mobile", *rel)
+        try:
+            if not caminho.is_file():
+                return self._send(404, b"nao encontrado")
+            dados = caminho.read_bytes()
+        except OSError:
+            return self._send(404, b"nao encontrado")
+        self._send(200, dados, _MIME.get(caminho.suffix.lower(), "application/octet-stream"))
+
+    # ----- roteamento -----
     def do_GET(self):
         try:
             ps = self._partes()
-            if not ps or ps[0] != "m" or len(ps) < 2:
-                return self._send(404, b"nao encontrado")
-            tok = ps[1]
-            e = _resolver(tok)
-            if e is None:
-                return self._send(403, "Link expirado ou inválido.".encode("utf-8"))
-            sub = ps[2] if len(ps) > 2 else ""
-            if sub == "":  # página mobile
-                numero = "—"
-                with _DB_LOCK:
-                    r = self.con.execute("SELECT numero FROM documentos WHERE id=?", (e["doc_id"],)).fetchone()
-                if r:
-                    numero = r["numero"]
-                html = _PAGINA.replace("__TOKEN__", tok).replace("__NUMERO__", _esc(numero))
-                return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
-            if sub == "fotos":
-                with _DB_LOCK:
-                    metas = repo.fotos.list_meta(self.con, e["doc_id"])
-                return self._json(metas)
-            if sub in ("thumb", "img") and len(ps) > 3 and ps[3].isdigit():
-                fid = int(ps[3])
-                with _DB_LOCK:
-                    if repo.fotos.doc_de(self.con, fid) != e["doc_id"]:
-                        return self._send(404, b"nao encontrado")
-                    if sub == "thumb":
-                        data, mime = repo.fotos.thumb(self.con, fid), "image/jpeg"
-                    else:
-                        data, mime = repo.fotos.full(self.con, fid)
-                if not data:
-                    return self._send(404, b"nao encontrado")
-                return self._send(200, bytes(data), mime, no_store=True)
+            if not ps:
+                return self._send(302, b"", extra=[("Location", "/app/")])
+            if ps[0] == "app":
+                return self._estatico(ps[1:])
+            if ps[0] == "api":
+                return self._api_get(ps[1:])
+            if ps[0] == "m":
+                return self._foto_get(ps)
             return self._send(404, b"nao encontrado")
         except Exception as ex:
             self._send(500, str(ex).encode("utf-8"))
@@ -192,29 +289,197 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             ps = self._partes()
-            if len(ps) < 3 or ps[0] != "m" or ps[2] != "foto":
-                return self._send(404, b"nao encontrado")
-            e = _resolver(ps[1])
-            if e is None:
-                return self._send(403, "Link expirado ou inválido.".encode("utf-8"))
-            length = int(self.headers.get("Content-Length", 0) or 0)
-            if length <= 0 or length > 25 * 1024 * 1024:
-                return self._send(400, b"corpo invalido")
-            data = json.loads(self.rfile.read(length).decode("utf-8"))
-            b64 = (data.get("b64") or "").split(",", 1)[-1]
-            raw = base64.b64decode(b64)
-            full, thumb = services.processar_foto(raw)  # CPU-bound: fora do _DB_LOCK p/ não serializar uploads
+            if ps[:1] == ["api"]:
+                return self._api_post(ps[1:])
+            if len(ps) >= 3 and ps[0] == "m" and ps[2] == "foto":
+                return self._foto_post(ps)
+            return self._send(404, b"nao encontrado")
+        except Exception as ex:
+            self._send(500, str(ex).encode("utf-8"))
+
+    # ----- API JSON (com sessão + RBAC) -----
+    def _api_get(self, rota):
+        if rota == ["me"]:
+            s = self._sessao()
+            if s is None:
+                return self._json({"erro": "Sessão expirada."}, 401)
+            mods = list(db.MODULO_KEYS) if s["is_suporte"] else sorted(s["modulos"])
+            return self._json({"login": s["login"], "is_suporte": s["is_suporte"], "modulos": mods})
+        if rota == ["os"]:
+            s = self._exige("os")
+            if s is None:
+                return
+            q = parse_qs(urlparse(self.path).query)
+            status = (q.get("status") or [None])[0]
+            termo = (q.get("q") or [None])[0]
             with _DB_LOCK:
-                fid = repo.fotos.add_processado(self.con, e["doc_id"], full, thumb,
-                                                origem="celular", usuario_id=e.get("uid"))
+                docs = repo.documentos.list(self.con, tipo="os", status=status or None, q=termo or None)
+            return self._json([_os_resumo(d) for d in docs])
+        if len(rota) == 2 and rota[0] == "os" and rota[1].isdigit():
+            s = self._exige("os")
+            if s is None:
+                return
+            oid = int(rota[1])
+            with _DB_LOCK:
+                d = repo.documentos.get(self.con, oid)
+                fotos = repo.fotos.list_meta(self.con, oid) if d else []
+            if not d or d.get("tipo") != "os":
+                return self._json({"erro": "O.S. não encontrada."}, 404)
+            return self._json(_os_detalhe(d, fotos, s))
+        if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "fotos":
+            s = self._exige("os")
+            if s is None:
+                return
+            with _DB_LOCK:
+                metas = repo.fotos.list_meta(self.con, int(rota[1]))
+            return self._json(metas)
+        if len(rota) == 3 and rota[0] == "foto" and rota[1].isdigit() and rota[2] in ("thumb", "full"):
+            s = self._exige("os")
+            if s is None:
+                return
+            fid = int(rota[1])
+            with _DB_LOCK:
+                if repo.fotos.doc_de(self.con, fid) is None:
+                    return self._send(404, b"nao encontrado")
+                if rota[2] == "thumb":
+                    data, mime = repo.fotos.thumb(self.con, fid), "image/jpeg"
+                else:
+                    data, mime = repo.fotos.full(self.con, fid)
+            if not data:
+                return self._send(404, b"nao encontrado")
+            return self._send(200, bytes(data), mime, no_store=True)
+        return self._json({"erro": "nao encontrado"}, 404)
+
+    def _api_post(self, rota):
+        if rota == ["login"]:
+            body = self._corpo_json(limite=64 * 1024) or {}
+            with _DB_LOCK:
+                user = repo.usuarios.autenticar(self.con, body.get("login"), body.get("senha"))
+                modulos = repo.usuarios.permissoes(self.con, user["id"], user["is_suporte"]) if user else []
+            if not user:
+                return self._json({"erro": "Login ou senha inválidos."}, 401)
+            sid = _criar_sessao(user, modulos)
+            try:
+                with _DB_LOCK:
+                    audit.registrar(self.con, {"id": user["id"], "login": user["login"]},
+                                    "login", "usuario", user["id"], f"Login pelo celular: {user['login']}")
+            except Exception:
+                pass
+            cookie = f"sid={sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSAO_TTL}"
+            mods = list(db.MODULO_KEYS) if user["is_suporte"] else modulos
+            return self._json({"login": user["login"], "nome": user.get("nome"),
+                               "modulos": mods, "is_suporte": user["is_suporte"]},
+                              extra=[("Set-Cookie", cookie)])
+        if rota == ["logout"]:
+            sid = self._cookie_sid()
+            if sid:
+                _remover_sessao(sid)
+            return self._json({"ok": True}, extra=[("Set-Cookie", "sid=; Path=/; Max-Age=0")])
+        if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "status":
+            s = self._exige("os")
+            if s is None:
+                return
+            body = self._corpo_json(limite=64 * 1024) or {}
+            novo, oid = body.get("status"), int(rota[1])
+            if novo == "Faturada" and not (s["is_suporte"] or "faturar" in s["modulos"]):
+                return self._json({"erro": "Você não tem permissão para faturar."}, 403)
+            try:
+                with _DB_LOCK:
+                    antes = self.con.execute("SELECT status FROM documentos WHERE id=? AND tipo='os'", (oid,)).fetchone()
+                    if antes is None:
+                        return self._json({"erro": "O.S. não encontrada."}, 404)
+                    repo.documentos.set_status(self.con, oid, novo)
+                    try:
+                        audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "status", "documento", oid,
+                                        f"O.S.: {antes['status']} → {novo} (celular)", {"de": antes["status"], "para": novo})
+                    except Exception:
+                        pass
+            except ValueError as ve:
+                return self._json({"erro": str(ve)}, 400)
+            return self._json({"ok": True})
+        if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "foto":
+            s = self._exige("os")
+            if s is None:
+                return
+            body = self._corpo_json()
+            if body is None:
+                return self._json({"erro": "corpo inválido"}, 400)
+            oid = int(rota[1])
+            with _DB_LOCK:
+                existe = self.con.execute("SELECT 1 FROM documentos WHERE id=? AND tipo='os'", (oid,)).fetchone()
+            if not existe:
+                return self._json({"erro": "O.S. não encontrada."}, 404)
+            try:
+                raw = base64.b64decode((body.get("b64") or "").split(",", 1)[-1])
+                full, thumb = services.processar_foto(raw)  # fora do _DB_LOCK
+            except ValueError as ve:
+                return self._json({"erro": str(ve)}, 400)
+            with _DB_LOCK:
+                fid = repo.fotos.add_processado(self.con, oid, full, thumb, origem="celular", usuario_id=s["uid"])
                 try:
-                    audit.registrar(self.con, {"id": e.get("uid"), "login": None}, "criar", "foto", fid,
-                                    "Foto anexada pelo celular", {"documento_id": e["doc_id"], "origem": "celular"})
+                    audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "criar", "foto", fid,
+                                    "Foto anexada pelo celular (app)", {"documento_id": oid, "origem": "celular"})
                 except Exception:
                     pass
             return self._json({"id": fid})
-        except Exception as ex:
-            self._send(500, str(ex).encode("utf-8"))
+        return self._json({"erro": "nao encontrado"}, 404)
+
+    # ----- captura de fotos por token (sem login) -----
+    def _foto_get(self, ps):
+        if len(ps) < 2:
+            return self._send(404, b"nao encontrado")
+        tok = ps[1]
+        e = _resolver(tok)
+        if e is None:
+            return self._send(403, "Link expirado ou inválido.".encode("utf-8"))
+        sub = ps[2] if len(ps) > 2 else ""
+        if sub == "":
+            numero = "—"
+            with _DB_LOCK:
+                r = self.con.execute("SELECT numero FROM documentos WHERE id=?", (e["doc_id"],)).fetchone()
+            if r:
+                numero = r["numero"]
+            html = _PAGINA.replace("__TOKEN__", tok).replace("__NUMERO__", _esc(numero))
+            return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+        if sub == "fotos":
+            with _DB_LOCK:
+                metas = repo.fotos.list_meta(self.con, e["doc_id"])
+            return self._json(metas)
+        if sub in ("thumb", "img") and len(ps) > 3 and ps[3].isdigit():
+            fid = int(ps[3])
+            with _DB_LOCK:
+                if repo.fotos.doc_de(self.con, fid) != e["doc_id"]:
+                    return self._send(404, b"nao encontrado")
+                if sub == "thumb":
+                    data, mime = repo.fotos.thumb(self.con, fid), "image/jpeg"
+                else:
+                    data, mime = repo.fotos.full(self.con, fid)
+            if not data:
+                return self._send(404, b"nao encontrado")
+            return self._send(200, bytes(data), mime, no_store=True)
+        return self._send(404, b"nao encontrado")
+
+    def _foto_post(self, ps):
+        e = _resolver(ps[1])
+        if e is None:
+            return self._send(403, "Link expirado ou inválido.".encode("utf-8"))
+        body = self._corpo_json()
+        if body is None:
+            return self._send(400, b"corpo invalido")
+        try:
+            raw = base64.b64decode((body.get("b64") or "").split(",", 1)[-1])
+            full, thumb = services.processar_foto(raw)  # CPU-bound: fora do _DB_LOCK
+        except ValueError as ve:
+            return self._json({"erro": str(ve)}, 400)
+        with _DB_LOCK:
+            fid = repo.fotos.add_processado(self.con, e["doc_id"], full, thumb,
+                                            origem="celular", usuario_id=e.get("uid"))
+            try:
+                audit.registrar(self.con, {"id": e.get("uid"), "login": None}, "criar", "foto", fid,
+                                "Foto anexada pelo celular", {"documento_id": e["doc_id"], "origem": "celular"})
+            except Exception:
+                pass
+        return self._json({"id": fid})
 
 
 def _esc(s):
