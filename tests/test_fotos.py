@@ -1,8 +1,9 @@
 import io
 
+import pytest
 from PIL import Image
 
-from clickos import db, repositories as repo
+from clickos import db, repositories as repo, services
 
 
 def _png(w=2000, h=1500, cor=(180, 30, 30)):
@@ -46,6 +47,24 @@ def test_add_redimensiona_e_gera_thumb(tmp_path):
     metas = repo.fotos.list_meta(con, osd["id"])
     assert len(metas) == 1 and metas[0]["origem"] == "celular"
     assert repo.fotos.doc_de(con, fid) == osd["id"]
+
+
+def test_rejeita_imagem_acima_do_limite(monkeypatch):
+    # guarda anti "decompression bomb": imagem cujos pixels excedem o teto é recusada antes de decodificar
+    monkeypatch.setattr(services, "MAX_PIXELS_FOTO", 1000)
+    with pytest.raises(ValueError):
+        services.processar_foto(_png(200, 200))  # 40.000 px > 1.000
+
+
+def test_add_processado_grava_bytes_prontos(tmp_path):
+    # caminho usado pelo servidor mobile: processa fora do lock e só insere os JPEGs prontos
+    con = db.connect(tmp_path / "t.db")
+    osd = _os(con)
+    full, thumb = services.processar_foto(_png())
+    fid = repo.fotos.add_processado(con, osd["id"], full, thumb, origem="celular")
+    assert repo.fotos.full(con, fid)[0] == full
+    assert repo.fotos.thumb(con, fid) == thumb
+    assert repo.fotos.list_meta(con, osd["id"])[0]["origem"] == "celular"
 
 
 def test_delete_e_cascade(tmp_path):

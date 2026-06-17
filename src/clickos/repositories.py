@@ -650,6 +650,11 @@ class _Fotos:
 
     def add(self, con, documento_id, raw_bytes, origem="desktop", usuario_id=None, stamp=None):
         full, thumb = services.processar_foto(raw_bytes)
+        return self.add_processado(con, documento_id, full, thumb, origem, usuario_id, stamp)
+
+    def add_processado(self, con, documento_id, full, thumb, origem="desktop", usuario_id=None, stamp=None):
+        """Insere uma foto JÁ redimensionada (full/thumb em JPEG). Permite manter a codificação
+        Pillow (CPU-bound) FORA de locks de concorrência — ver mobile_server.do_POST."""
         cur = con.execute(
             "INSERT INTO documento_fotos(documento_id,thumb,imagem,mimetype,origem,usuario_id,criado_em) "
             "VALUES (?,?,?,?,?,?,?)",

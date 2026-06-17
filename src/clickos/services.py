@@ -6,6 +6,7 @@ import os
 
 PBKDF2_ITER = 120000
 SENHA_RESET = "1234"  # senha temporária aplicada ao redefinir (usuário troca no 1º login)
+MAX_PIXELS_FOTO = 64_000_000  # ~8000x8000: cobre qualquer câmera real e barra "decompression bomb"
 
 
 class EmVinculo(Exception):
@@ -36,6 +37,9 @@ def processar_foto(raw, max_full=1600, max_thumb=320, q_full=82, q_thumb=70):
     import io
     from PIL import Image, ImageOps
     im = Image.open(io.BytesIO(raw))
+    largura, altura = im.size  # vem do cabeçalho (barato); valida ANTES de decodificar
+    if largura * altura > MAX_PIXELS_FOTO:  # barra imagem minúscula que descompacta gigante (DoS)
+        raise ValueError("Imagem com resolução acima do permitido.")
     im = ImageOps.exif_transpose(im)  # respeita a orientação registrada pela câmera
     if im.mode in ("RGBA", "LA", "P"):
         rgba = im.convert("RGBA")

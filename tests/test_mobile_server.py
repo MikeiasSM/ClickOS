@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import threading
 import urllib.error
 import urllib.request
 
@@ -56,6 +57,31 @@ def test_pagina_e_upload(servidor):
     assert img.status == 200 and img.headers.get("Content-Type") == "image/jpeg"
     # gravou no banco do servidor
     assert repo.fotos.doc_de(servidor["con"], fid) == doc_id
+
+
+def test_uploads_concorrentes(servidor):
+    # 4 celulares enviando ao mesmo tempo: o processamento Pillow ocorre fora do _DB_LOCK,
+    # mas todas as gravações devem persistir sem corromper (thread-safety do insert sob lock).
+    porta, doc_id = servidor["porta"], servidor["doc_id"]
+    tok = mobile_server.criar_token(doc_id, usuario_id=1)
+    base = f"http://127.0.0.1:{porta}/m/{tok}"
+    corpo = json.dumps({"b64": base64.b64encode(_jpeg()).decode(), "mime": "image/jpeg"}).encode()
+    erros = []
+
+    def enviar():
+        try:
+            req = urllib.request.Request(base + "/foto", data=corpo, headers={"Content-Type": "application/json"})
+            assert json.loads(urllib.request.urlopen(req, timeout=10).read().decode())["id"]
+        except Exception as ex:  # noqa: BLE001
+            erros.append(ex)
+
+    ts = [threading.Thread(target=enviar) for _ in range(4)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not erros, erros
+    assert len(repo.fotos.list_meta(servidor["con"], doc_id)) == 4
 
 
 def test_token_invalido_e_expirado(servidor):

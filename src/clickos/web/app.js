@@ -404,7 +404,7 @@ function cadastrarCidade(nome, onDone) {
 /* ----------------------------------------------------------------- router */
 function setActive(view) { document.querySelectorAll(".menu a").forEach(a => a.classList.toggle("active", a.dataset.view === view)); const cb = document.getElementById("btn-config"); if (cb) cb.classList.toggle("active", view === "config"); }
 const VIEWS = { dashboard: viewDashboard, orcamentos: viewOrcamentos, documentos: viewDocumentos, clientes: viewClientes, veiculos: viewVeiculos, produtos: viewProdutos };
-async function setView(view) { setActive(view); try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
+async function setView(view) { setActive(view); const mr = document.getElementById("modal-root"); if (mr) mr.innerHTML = ""; try { await VIEWS[view](); } catch (e) { render(`<div class="empty">Erro ao carregar: ${esc(e.message)}</div>`); } }
 
 /* ----------------------------------------------------------------- dashboard */
 function kpi(label, v, icon, color, bg, sub) {
@@ -1096,7 +1096,9 @@ async function openOS(id, opts) {
     carregarFotos();
     main().querySelector("#btn-add-foto").onclick = async () => {
       const r = await api("add_fotos_desktop", id);
-      if (r && r.adicionadas) { toast(r.adicionadas + " foto(s) adicionada(s)", "ok"); carregarFotos(); }
+      if (!r) return;
+      if (r.adicionadas) { toast(r.adicionadas + " foto(s) adicionada(s)", "ok"); carregarFotos(); }
+      if (r.erros && r.erros.length) toast(r.erros.length + " arquivo(s) não puderam ser adicionados", "err");
     };
     main().querySelector("#btn-foto-cel").onclick = async () => {
       let s; try { s = await api("foto_sessao", id); } catch (e) { return; }
@@ -1113,7 +1115,7 @@ async function openOS(id, opts) {
       mm.querySelector(".close").onclick = fechar; mm.querySelector("#qr-fechar").onclick = fechar;
       mbg.addEventListener("mousedown", e => { if (e.target === mbg) fechar(); });
       const poll = async () => {
-        if (!ativo) return;
+        if (!ativo || !mm.isConnected) return;  // para se o modal saiu do DOM (ex.: navegou "Voltar")
         try {
           const fotos = await api("list_fotos", id);
           if (ultimo === -1) ultimo = fotos.length;
@@ -1122,7 +1124,7 @@ async function openOS(id, opts) {
             mm.querySelector("#qr-status").textContent = fotos.length + " foto(s) recebida(s).";
           }
         } catch (e) {}
-        if (ativo) setTimeout(poll, 3000);
+        if (ativo && mm.isConnected) setTimeout(poll, 3000);
       };
       setTimeout(poll, 3000);
     };

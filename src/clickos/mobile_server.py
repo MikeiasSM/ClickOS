@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import audit
 from . import repositories as repo
+from . import services
 
 # ---- estado de módulo (compartilhado entre a thread do bridge e a do servidor) ----
 PORTA = None
@@ -202,8 +203,10 @@ class _Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode("utf-8"))
             b64 = (data.get("b64") or "").split(",", 1)[-1]
             raw = base64.b64decode(b64)
+            full, thumb = services.processar_foto(raw)  # CPU-bound: fora do _DB_LOCK p/ não serializar uploads
             with _DB_LOCK:
-                fid = repo.fotos.add(self.con, e["doc_id"], raw, origem="celular", usuario_id=e.get("uid"))
+                fid = repo.fotos.add_processado(self.con, e["doc_id"], full, thumb,
+                                                origem="celular", usuario_id=e.get("uid"))
                 try:
                     audit.registrar(self.con, {"id": e.get("uid"), "login": None}, "criar", "foto", fid,
                                     "Foto anexada pelo celular", {"documento_id": e["doc_id"], "origem": "celular"})

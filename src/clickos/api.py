@@ -352,6 +352,7 @@ class Api:
     @_api
     def list_fotos(self, doc_id):
         """Galeria do editor: thumbs como data URI + meta."""
+        self._sessao()
         return [{"id": r["id"], "thumb_uri": services.image_data_uri(r["thumb"]),
                  "origem": r["origem"], "criado_em": r["criado_em"]}
                 for r in repo.fotos.list_thumbs(self.con, doc_id)]
@@ -359,6 +360,7 @@ class Api:
     @_api
     def get_foto(self, foto_id):
         """Imagem cheia (data URI) para o visualizador ampliado."""
+        self._sessao()
         img, _ = repo.fotos.full(self.con, foto_id)
         if img is None:
             raise ValueError("Foto não encontrada.")
@@ -375,6 +377,7 @@ class Api:
             return {"cancelado": True}
         arquivos = res if isinstance(res, (list, tuple)) else [res]
         n = 0
+        erros = []
         for p in arquivos:
             try:
                 fid = repo.fotos.add(self.con, doc_id, Path(p).read_bytes(),
@@ -382,9 +385,9 @@ class Api:
                 self._audit("criar", "foto", fid, "Foto anexada à O.S. (desktop)",
                             {"documento_id": doc_id, "origem": "desktop"})
                 n += 1
-            except Exception:
-                pass
-        return {"adicionadas": n}
+            except Exception as ex:
+                erros.append(f"{Path(p).name}: {ex}")
+        return {"adicionadas": n, "erros": erros}
 
     @_api
     def delete_foto(self, foto_id):
