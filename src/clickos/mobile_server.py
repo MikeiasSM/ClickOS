@@ -33,6 +33,9 @@ _DB_LOCK = threading.Lock()  # serializa o acesso à conexão do servidor entre 
 TTL = 12 * 3600
 SESSAO_TTL = 8 * 3600
 PORTAS = [8732, 8733, 8734, 8080, 0]  # 0 = porta efêmera do SO como último recurso
+_FALHAS = {}                  # (login, ip) -> {"n": tentativas, "ate": epoch de desbloqueio}
+LOGIN_MAX_FALHAS = 5
+LOGIN_BLOQUEIO = 300          # segundos de bloqueio após exceder as tentativas
 
 _MIME = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".webmanifest": "application/manifest+json; charset=utf-8",
@@ -46,6 +49,7 @@ _FLUXO = {"Aberta": ["Em Execução"], "Em Execução": ["Concluída"],
 def criar_token(doc_id, usuario_id=None, ttl=TTL):
     tok = secrets.token_urlsafe(16)
     with _LOCK:
+        _purgar_expirados()
         _TOKENS[tok] = {"doc_id": int(doc_id), "exp": time.time() + ttl, "uid": usuario_id}
     return tok
 
@@ -62,9 +66,19 @@ def _resolver(tok):
 
 
 # ---- sessões do app (com login) ----
+def _purgar_expirados():
+    """Remove sessões e tokens vencidos. Assume que _LOCK já está adquirido."""
+    agora = time.time()
+    for sid in [k for k, v in _SESSOES.items() if v["exp"] < agora]:
+        _SESSOES.pop(sid, None)
+    for tok in [k for k, v in _TOKENS.items() if v["exp"] < agora]:
+        _TOKENS.pop(tok, None)
+
+
 def _criar_sessao(user, modulos):
     sid = secrets.token_urlsafe(24)
     with _LOCK:
+        _purgar_expirados()
         _SESSOES[sid] = {"uid": user["id"], "login": user["login"], "is_suporte": bool(user["is_suporte"]),
                          "modulos": set(modulos), "exp": time.time() + SESSAO_TTL}
     return sid
@@ -86,6 +100,37 @@ def _sessao_por_sid(sid):
 def _remover_sessao(sid):
     with _LOCK:
         _SESSOES.pop(sid, None)
+
+
+def derrubar_sessoes_de(uid):
+    """Invalida todas as sessões mobile de um usuário (ao trocar/resetar senha, desativar, mudar papel)."""
+    with _LOCK:
+        for sid in [k for k, v in _SESSOES.items() if v["uid"] == uid]:
+            _SESSOES.pop(sid, None)
+
+
+# ---- proteção a brute-force no login ----
+def _login_bloqueado(chave):
+    with _LOCK:
+        e = _FALHAS.get(chave)
+        if e and e["ate"] > time.time():
+            return int(e["ate"] - time.time()) + 1
+    return 0
+
+
+def _login_falha(chave):
+    with _LOCK:
+        e = _FALHAS.get(chave) or {"n": 0, "ate": 0}
+        e["n"] += 1
+        if e["n"] >= LOGIN_MAX_FALHAS:
+            e["ate"] = time.time() + LOGIN_BLOQUEIO
+            e["n"] = 0
+        _FALHAS[chave] = e
+
+
+def _login_ok(chave):
+    with _LOCK:
+        _FALHAS.pop(chave, None)
 
 
 def _ler_cookies(raw):
@@ -283,8 +328,8 @@ class _Handler(BaseHTTPRequestHandler):
             if ps[0] == "m":
                 return self._foto_get(ps)
             return self._send(404, b"nao encontrado")
-        except Exception as ex:
-            self._send(500, str(ex).encode("utf-8"))
+        except Exception:
+            self._send(500, b"Erro interno.")  # não vaza detalhes internos (SQL/paths/PIL)
 
     def do_POST(self):
         try:
@@ -294,8 +339,8 @@ class _Handler(BaseHTTPRequestHandler):
             if len(ps) >= 3 and ps[0] == "m" and ps[2] == "foto":
                 return self._foto_post(ps)
             return self._send(404, b"nao encontrado")
-        except Exception as ex:
-            self._send(500, str(ex).encode("utf-8"))
+        except Exception:
+            self._send(500, b"Erro interno.")
 
     # ----- API JSON (com sessão + RBAC) -----
     def _api_get(self, rota):
@@ -330,8 +375,12 @@ class _Handler(BaseHTTPRequestHandler):
             s = self._exige("os")
             if s is None:
                 return
+            oid = int(rota[1])
             with _DB_LOCK:
-                metas = repo.fotos.list_meta(self.con, int(rota[1]))
+                d = repo.documentos.get(self.con, oid)
+                metas = repo.fotos.list_meta(self.con, oid) if (d and d.get("tipo") == "os") else None
+            if metas is None:
+                return self._json({"erro": "O.S. não encontrada."}, 404)
             return self._json(metas)
         if len(rota) == 3 and rota[0] == "foto" and rota[1].isdigit() and rota[2] in ("thumb", "full"):
             s = self._exige("os")
@@ -353,11 +402,25 @@ class _Handler(BaseHTTPRequestHandler):
     def _api_post(self, rota):
         if rota == ["login"]:
             body = self._corpo_json(limite=64 * 1024) or {}
+            chave = ((body.get("login") or "").strip().upper(), self.client_address[0])
+            espera = _login_bloqueado(chave)
+            if espera:
+                return self._json({"erro": f"Muitas tentativas. Aguarde {espera}s e tente novamente."}, 429)
             with _DB_LOCK:
                 user = repo.usuarios.autenticar(self.con, body.get("login"), body.get("senha"))
                 modulos = repo.usuarios.permissoes(self.con, user["id"], user["is_suporte"]) if user else []
             if not user:
+                _login_falha(chave)
+                try:
+                    with _DB_LOCK:
+                        audit.registrar(self.con, {"id": None, "login": chave[0] or None}, "login_falha",
+                                        "usuario", None, f"Login malsucedido pelo celular: {chave[0] or '(vazio)'}")
+                except Exception:
+                    pass
                 return self._json({"erro": "Login ou senha inválidos."}, 401)
+            _login_ok(chave)
+            if user.get("must_change"):  # senha provisória: trocar no computador antes de usar o celular
+                return self._json({"erro": "Sua senha é provisória. Troque-a no computador antes de acessar pelo celular."}, 403)
             sid = _criar_sessao(user, modulos)
             try:
                 with _DB_LOCK:
@@ -374,20 +437,26 @@ class _Handler(BaseHTTPRequestHandler):
             sid = self._cookie_sid()
             if sid:
                 _remover_sessao(sid)
-            return self._json({"ok": True}, extra=[("Set-Cookie", "sid=; Path=/; Max-Age=0")])
+            return self._json({"ok": True}, extra=[("Set-Cookie", "sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")])
         if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "status":
             s = self._exige("os")
             if s is None:
                 return
             body = self._corpo_json(limite=64 * 1024) or {}
             novo, oid = body.get("status"), int(rota[1])
-            if novo == "Faturada" and not (s["is_suporte"] or "faturar" in s["modulos"]):
+            pode_fat = s["is_suporte"] or "faturar" in s["modulos"]
+            if novo not in db.STATUS_OS:  # só status válidos de O.S.
+                return self._json({"erro": "Status inválido."}, 400)
+            if novo == "Faturada" and not pode_fat:
                 return self._json({"erro": "Você não tem permissão para faturar."}, 403)
             try:
                 with _DB_LOCK:
                     antes = self.con.execute("SELECT status FROM documentos WHERE id=? AND tipo='os'", (oid,)).fetchone()
                     if antes is None:
                         return self._json({"erro": "O.S. não encontrada."}, 404)
+                    permitidos = [st for st in _FLUXO.get(antes["status"], []) if st != "Faturada" or pode_fat]
+                    if novo not in permitidos:  # respeita o fluxo apresentado no app
+                        return self._json({"erro": "Esta mudança de status não é permitida pelo app."}, 400)
                     repo.documentos.set_status(self.con, oid, novo)
                     try:
                         audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "status", "documento", oid,
@@ -412,8 +481,8 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 raw = base64.b64decode((body.get("b64") or "").split(",", 1)[-1])
                 full, thumb = services.processar_foto(raw)  # fora do _DB_LOCK
-            except ValueError as ve:
-                return self._json({"erro": str(ve)}, 400)
+            except Exception:  # base64 inválido, não-imagem (UnidentifiedImageError) ou bomba
+                return self._json({"erro": "Imagem inválida."}, 400)
             with _DB_LOCK:
                 fid = repo.fotos.add_processado(self.con, oid, full, thumb, origem="celular", usuario_id=s["uid"])
                 try:
@@ -469,8 +538,8 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             raw = base64.b64decode((body.get("b64") or "").split(",", 1)[-1])
             full, thumb = services.processar_foto(raw)  # CPU-bound: fora do _DB_LOCK
-        except ValueError as ve:
-            return self._json({"erro": str(ve)}, 400)
+        except Exception:  # base64 inválido, não-imagem ou bomba de descompressão
+            return self._json({"erro": "Imagem inválida."}, 400)
         with _DB_LOCK:
             fid = repo.fotos.add_processado(self.con, e["doc_id"], full, thumb,
                                             origem="celular", usuario_id=e.get("uid"))

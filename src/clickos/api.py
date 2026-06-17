@@ -111,6 +111,13 @@ class Api:
 
     _ERRO_ULTIMO_ADMIN = "É necessário que ao menos um administrador mantenha o acesso a Usuários e Permissões."
 
+    def _derrubar_sessoes(self, uid):
+        """Invalida as sessões do app mobile de um usuário (senha/permissões/estado mudaram)."""
+        try:
+            mobile_server.derrubar_sessoes_de(uid)
+        except Exception:
+            pass
+
     def _audit(self, acao, entidade=None, entidade_id=None, descricao="", detalhes=None, usuario=None):
         """Registra um evento de auditoria sem nunca quebrar a ação principal (já efetivada)."""
         try:
@@ -699,6 +706,8 @@ class Api:
                         {"snapshot": audit.snapshot(saved)})
         if "overrides" in payload and not saved.get("is_suporte"):  # exceções de permissão por usuário
             repo.usuarios.set_overrides(self.con, saved["id"], payload.get("overrides") or {})
+        if payload.get("id"):  # edição: permissões/estado podem ter mudado — derruba sessões mobile
+            self._derrubar_sessoes(saved["id"])
         return saved
 
     @_api
@@ -727,6 +736,9 @@ class Api:
                 if not self._ha_admin_usuarios(role_id=payload["id"], role_modulos=payload.get("modulos")):
                     raise services.EmVinculo(self._ERRO_ULTIMO_ADMIN)
             saved = repo.papeis.update(self.con, payload["id"], payload)
+            for u in repo.usuarios.list(self.con):  # permissões do papel mudaram: derruba sessões mobile afetadas
+                if u.get("papel_id") == saved["id"]:
+                    self._derrubar_sessoes(u["id"])
             self._audit("editar", "papel", saved["id"], f"Papel {saved.get('nome', '')} alterado",
                         {"diff": audit.diff(antes, saved)})
             return saved
@@ -752,6 +764,7 @@ class Api:
             if not self._ha_admin_usuarios(uid_alt=uid, ativo_alt=False):
                 raise services.EmVinculo(self._ERRO_ULTIMO_ADMIN)
         repo.usuarios.delete(self.con, uid)
+        self._derrubar_sessoes(uid)
         self._audit("excluir", "usuario", uid, f"Usuário {(alvo or {}).get('login', uid)} excluído",
                     {"snapshot": audit.snapshot(alvo)})
         return True
@@ -770,6 +783,7 @@ class Api:
         if alvo.get("is_suporte") and not sess.get("is_suporte"):
             raise ValueError("Apenas o SUPORTE pode redefinir a senha do SUPORTE.")
         res = repo.usuarios.reset_senha(self.con, alvo_id, sess["id"], payload.get("senha") or "")
+        self._derrubar_sessoes(alvo_id)  # invalida sessões mobile do usuário
         self._audit("parametro", "usuario", alvo_id, f"Senha redefinida para o usuário {alvo.get('login', '')}")
         return res
 
@@ -784,6 +798,7 @@ class Api:
         if not atual or not atual["must_change"]:
             raise ValueError("Troca de senha não solicitada.")
         saved = repo.usuarios.definir_senha(self.con, sess["id"], payload.get("nova_senha") or "")
+        self._derrubar_sessoes(sess["id"])  # força novo login no celular com a nova senha
         self._audit("parametro", "usuario", sess["id"], f"Senha alterada pelo usuário {sess.get('login', '')}")
         # devolve os módulos (como o login) para a UI não perder as permissões no fluxo de 1ª troca
         modulos = repo.usuarios.permissoes(self.con, sess["id"], sess.get("is_suporte"))

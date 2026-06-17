@@ -8,7 +8,8 @@ import urllib.request
 import pytest
 from PIL import Image
 
-from clickos import db, mobile_server, repositories as repo
+from clickos import db, mobile_server, repositories as repo, services
+from clickos.api import Api
 
 
 def _jpeg():
@@ -35,6 +36,7 @@ def srv(tmp_path):
     _parar_servidor()  # encerra qualquer servidor vazado de outro teste (evita colisão de porta)
     mobile_server._SESSOES.clear()
     mobile_server._TOKENS.clear()
+    mobile_server._FALHAS.clear()
     porta, _ip = mobile_server.iniciar(con_factory=lambda: db.connect(caminho))
     assert porta, "servidor não subiu"
     con = db.connect(caminho)
@@ -132,3 +134,58 @@ def test_usuario_sem_os_bloqueado(srv):
     req = _cliente(srv["porta"])
     req("POST", "/api/login", {"login": "DASH", "senha": "1234"})
     assert req("GET", "/api/os")[0] == 403
+
+
+# ----------------------------------------------------------------- correções da revisão (mobile)
+def test_login_rate_limit(srv):
+    req = _cliente(srv["porta"])
+    for i in range(5):
+        assert req("POST", "/api/login", {"login": "MEC", "senha": f"errada{i}"})[0] == 401
+    assert req("POST", "/api/login", {"login": "MEC", "senha": "x"})[0] == 429        # bloqueado
+    assert req("POST", "/api/login", {"login": "MEC", "senha": "1234"})[0] == 429     # vale até p/ a senha certa
+
+
+def test_senha_provisoria_bloqueia_mobile(srv):
+    con = srv["con"]
+    sup = con.execute("SELECT id FROM usuarios WHERE login='SUPORTE'").fetchone()[0]
+    mec = con.execute("SELECT id FROM usuarios WHERE login='MEC'").fetchone()[0]
+    repo.usuarios.reset_senha(con, mec, sup, "1234567890")  # must_change=1, senha provisória
+    req = _cliente(srv["porta"])
+    assert req("POST", "/api/login", {"login": "MEC", "senha": services.SENHA_RESET})[0] == 403
+
+
+def test_upload_nao_imagem_400(srv):
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "SUPORTE", "senha": "1234567890"})
+    b64 = base64.b64encode(b"isto nao e uma imagem").decode()
+    st, d = req("POST", f"/api/os/{srv['os_id']}/foto", {"b64": b64, "mime": "image/jpeg"})
+    assert st == 400 and d["erro"] == "Imagem inválida."
+
+
+def test_fotos_exige_tipo_os(srv):
+    con = srv["con"]
+    cid = con.execute("SELECT cliente_id FROM documentos WHERE id=?", (srv["os_id"],)).fetchone()[0]
+    orc = repo.documentos.create(con, {"tipo": "orcamento", "data_abertura": "2026-06-17", "cliente_id": cid,
+                                       "itens": [{"descricao": "x", "quantidade": 1, "valor_unitario": 10}]})
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "SUPORTE", "senha": "1234567890"})
+    assert req("GET", f"/api/os/{orc['id']}/fotos")[0] == 404
+
+
+def test_status_respeita_fluxo(srv):
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "SUPORTE", "senha": "1234567890"})
+    oid = srv["os_id"]  # Aberta
+    assert req("POST", f"/api/os/{oid}/status", {"status": "Faturada"})[0] == 400  # pulo proibido
+    assert req("POST", f"/api/os/{oid}/status", {"status": "Em Execução"})[0] == 200  # avanço válido
+
+
+def test_reset_senha_derruba_sessao_mobile(srv):
+    con = srv["con"]
+    req = _cliente(srv["porta"])
+    assert req("POST", "/api/login", {"login": "MEC", "senha": "1234"})[0] == 200
+    assert req("GET", "/api/me")[0] == 200
+    api = Api(con); api.login({"login": "SUPORTE", "senha": "1234567890"})
+    mec = con.execute("SELECT id FROM usuarios WHERE login='MEC'").fetchone()[0]
+    assert api.reset_senha({"alvo_id": mec, "senha": "1234567890"})["ok"]
+    assert req("GET", "/api/me")[0] == 401  # sessão mobile foi invalidada
