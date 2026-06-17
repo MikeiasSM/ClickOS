@@ -35,6 +35,8 @@ const ICONS = {
   chevron: '<polyline points="6 9 12 15 18 9"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+  qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><line x1="14" y1="14" x2="14" y2="17"/><line x1="17" y1="14" x2="21" y2="14"/><line x1="14" y1="21" x2="21" y2="21"/><line x1="21" y1="17" x2="21" y2="21"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   sheet: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
@@ -916,6 +918,11 @@ async function openOS(id, opts) {
       <div class="acc-body"><div class="field" style="margin-top:8px"><label>Ocorrência (relato do cliente)</label><textarea id="f_ocor">${esc(doc.ocorrencia || "")}</textarea></div>
       <div class="field"><label>Observações de Entrada</label><textarea id="f_obsent">${esc(doc.obs_entrada || "")}</textarea></div></div></div>
 
+    ${id ? `<div class="card mt" id="card-fotos"><div class="between"><h3 class="sec-title" style="margin:0">Fotos da O.S.</h3>
+      <div class="row"><button class="btn btn-sm" id="btn-add-foto">${ic("upload", 15)}<span>Adicionar foto</span></button>
+        <button class="btn btn-sm btn-primary" id="btn-foto-cel">${ic("camera", 15)}<span>Capturar pelo celular</span></button></div></div>
+      <div class="foto-grid" id="foto-grid"></div></div>` : ""}
+
     <div class="card mt" id="card-itens" style="${verItens ? "" : "display:none"}"><h3 class="sec-title">Serviços e Produtos</h3><div id="itens-box"></div>
       <div class="totais">
         <div class="tot-line"><span class="muted">Subtotal</span><b id="t_sub">R$ 0,00</b></div>
@@ -1063,9 +1070,67 @@ async function openOS(id, opts) {
   });
   // acordeão: clicar no cabeçalho expande/recolhe (checklist e observações)
   main().querySelectorAll(".acc[data-acc] .acc-head").forEach(hd => hd.onclick = () => hd.parentElement.classList.toggle("collapsed"));
-  // O.S. faturada existente: somente leitura (cabeçalhos do acordeão continuam clicáveis p/ visualizar)
+
+  // ---- Fotos da O.S. (galeria + adicionar/capturar). Anexar é permitido mesmo faturada; excluir, não. ----
+  if (id) {
+    const fgrid = main().querySelector("#foto-grid");
+    const carregarFotos = async () => {
+      const fotos = await api("list_fotos", id);
+      fgrid.innerHTML = "";
+      if (!fotos.length) { fgrid.appendChild(h(`<div class="muted small">Nenhuma foto anexada ainda.</div>`)); return; }
+      fotos.forEach(f => {
+        const cell = h(`<div class="foto-cell"><img src="${f.thumb_uri}" loading="lazy">${f.origem === "celular" ? `<span class="foto-tag" title="Enviada pelo celular">${ic("phone", 12)}</span>` : ""}${travada ? "" : `<button class="foto-del" title="Excluir">${ic("trash", 14)}</button>`}</div>`);
+        cell.querySelector("img").onclick = async () => {
+          const full = await api("get_foto", f.id);
+          const lm = h(`<div class="modal foto-lightbox"><button class="close">×</button><img src="${full.uri}"></div>`);
+          const lbg = openModal(lm); lm.querySelector(".close").onclick = () => lbg.remove();
+        };
+        const del = cell.querySelector(".foto-del");
+        if (del) del.onclick = async () => {
+          if (!await confirma("Excluir esta foto?", { danger: true, ok: "Excluir" })) return;
+          try { await api("delete_foto", f.id); carregarFotos(); } catch (e) {}
+        };
+        fgrid.appendChild(cell);
+      });
+    };
+    carregarFotos();
+    main().querySelector("#btn-add-foto").onclick = async () => {
+      const r = await api("add_fotos_desktop", id);
+      if (r && r.adicionadas) { toast(r.adicionadas + " foto(s) adicionada(s)", "ok"); carregarFotos(); }
+    };
+    main().querySelector("#btn-foto-cel").onclick = async () => {
+      let s; try { s = await api("foto_sessao", id); } catch (e) { return; }
+      const mm = h(`<div class="modal" style="width:420px;text-align:center"><button class="close">×</button>
+        <h3>Capturar pelo celular</h3>
+        <p class="muted small">Aponte a câmera do celular para o QR Code (mesma rede Wi‑Fi) ou digite o endereço no navegador do celular.</p>
+        <div class="qr-box">${s.qr_svg}</div>
+        <div class="qr-url">${esc(s.url)}</div>
+        <p class="muted small" id="qr-status">Aguardando fotos do celular…</p>
+        <div class="mt"><button class="btn btn-primary" id="qr-fechar">Concluir</button></div></div>`);
+      const mbg = openModal(mm);
+      let ativo = true, ultimo = -1;
+      const fechar = () => { ativo = false; mbg.remove(); carregarFotos(); };
+      mm.querySelector(".close").onclick = fechar; mm.querySelector("#qr-fechar").onclick = fechar;
+      mbg.addEventListener("mousedown", e => { if (e.target === mbg) fechar(); });
+      const poll = async () => {
+        if (!ativo) return;
+        try {
+          const fotos = await api("list_fotos", id);
+          if (ultimo === -1) ultimo = fotos.length;
+          else if (fotos.length !== ultimo) {
+            ultimo = fotos.length; carregarFotos();
+            mm.querySelector("#qr-status").textContent = fotos.length + " foto(s) recebida(s).";
+          }
+        } catch (e) {}
+        if (ativo) setTimeout(poll, 3000);
+      };
+      setTimeout(poll, 3000);
+    };
+  }
+
+  // O.S. faturada existente: somente leitura (o card de Fotos continua ativo p/ anexar; acordeões clicáveis)
   if (travada) {
-    main().querySelectorAll(".card").forEach(c => c.classList.add("os-locked"));
+    main().querySelectorAll(".card").forEach(c => { if (c.id !== "card-fotos") c.classList.add("os-locked"); });
     main().querySelectorAll(".item-form").forEach(el => el.style.display = "none");
   }
 }
@@ -1517,7 +1582,8 @@ const AUDIT_ACOES = {
   backup: { lbl: "Backup", cls: "b-gray" }, restaurar: { lbl: "Restauração", cls: "b-late" },
 };
 const AUDIT_ENT = { cliente: "Pessoa", veiculo: "Veículo", item: "Produto/Serviço", documento: "Documento",
-  usuario: "Usuário", empresa: "Empresa", preferencias: "Preferências", parametro: "Parâmetro" };
+  usuario: "Usuário", empresa: "Empresa", preferencias: "Preferências", parametro: "Parâmetro",
+  foto: "Foto", foto_sessao: "Captura por celular" };
 function fmtAuditVal(v) { if (v === null || v === undefined || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v); }
 
 async function renderAuditoria(container) {
@@ -1611,6 +1677,7 @@ async function renderPreferencias(container) {
 
     <div class="mt">${sec("printer", "Impressão da O.S.", "O que aparece no documento impresso",
       row("Checklist de entrada", "Inclui a vistoria de entrada (lataria, itens) no layout.", sw("p_pchk", prefs.os_print_checklist)) +
+      row("Fotos da O.S.", "Inclui as fotos anexadas no PDF e no Excel.", sw("p_pfot", prefs.os_print_fotos)) +
       row("Termo de garantia", "Usa o termo cadastrado em <b>Empresa</b> no rodapé.", sw("p_pgar", prefs.os_print_garantia)))}</div>
 
     <div class="between mt"><span></span><button class="btn btn-primary" id="p_save">${ic("save", 16)}<span>Salvar preferências</span></button></div>`;
@@ -1626,6 +1693,7 @@ async function renderPreferencias(container) {
       os_exige_oc: container.querySelector("#p_oc").checked ? "1" : "0",
       os_exige_km: container.querySelector("#p_km").checked ? "1" : "0",
       os_print_checklist: container.querySelector("#p_pchk").checked ? "1" : "0",
+      os_print_fotos: container.querySelector("#p_pfot").checked ? "1" : "0",
       os_print_garantia: container.querySelector("#p_pgar").checked ? "1" : "0",
     };
     B.preferencias = await api("save_preferencias", payload);

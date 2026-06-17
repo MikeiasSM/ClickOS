@@ -43,19 +43,19 @@ def logo_data_uri(empresa) -> str:
     return "data:image/png;base64," + base64.b64encode(logo).decode("ascii")
 
 
-def render_documento(doc, empresa, cliente=None, veiculo=None, prefs=None, gerado_em="") -> str:
+def render_documento(doc, empresa, cliente=None, veiculo=None, prefs=None, fotos=None, gerado_em="") -> str:
     """Retorna o HTML A4 do documento pronto para impressão."""
     tmpl = _environment().get_template("print.html")
     termo = empresa.get("termo_garantia") if isinstance(empresa, dict) else None
     return tmpl.render(
         doc=doc, empresa=empresa, cliente=cliente or {}, veiculo=veiculo or {}, prefs=prefs or {},
-        termo_html=markdown_min.to_html(termo),
+        termo_html=markdown_min.to_html(termo), fotos=fotos or [],
         logo_uri=logo_data_uri(empresa), pecas=dbmod.LISTA_PECAS,
         niveis=dbmod.NIVEIS_COMBUSTIVEL, gerado_em=gerado_em,
     )
 
 
-def render_recebimento(doc, empresa, cliente=None, veiculo=None, prefs=None, gerado_em="") -> str:
+def render_recebimento(doc, empresa, cliente=None, veiculo=None, prefs=None, fotos=None, gerado_em="") -> str:
     """Comprovante de recebimento do veículo (prova de custódia, gerado na abertura da O.S.)."""
     tmpl = _environment().get_template("recebimento.html")
     termo = empresa.get("termo_garantia") if isinstance(empresa, dict) else None

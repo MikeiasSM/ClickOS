@@ -9,6 +9,7 @@ import webview
 from . import audit
 from . import db as dbmod
 from . import excel_export
+from . import mobile_server
 from . import paths
 from . import printing
 from . import repositories as repo
@@ -20,6 +21,19 @@ def _doc_label(doc) -> str:
     if not doc:
         return "Documento"
     return "O.S." if doc.get("tipo") == "os" else "Orçamento"
+
+
+def _qr_svg(texto) -> str:
+    """QR Code em SVG (string) para o link de captura por celular — sem depender do Pillow."""
+    import io
+    import qrcode
+    import qrcode.image.svg
+    img = qrcode.make(texto, image_factory=qrcode.image.svg.SvgPathImage, box_size=10, border=2)
+    buf = io.BytesIO()
+    img.save(buf)
+    svg = buf.getvalue().decode("utf-8")
+    i = svg.find("<svg")  # remove o prólogo <?xml?> para embutir via innerHTML
+    return svg[i:] if i >= 0 else svg
 
 
 def _stamp() -> str:
@@ -289,7 +303,11 @@ class Api:
         veiculo = repo.veiculos.get(self.con, doc["veiculo_id"]) if doc.get("veiculo_id") else {}
         empresa = dict(self.con.execute("SELECT * FROM empresa WHERE id=1").fetchone())
         prefs = repo.get_preferencias(self.con)
-        html = renderer(doc, empresa, cliente, veiculo, prefs=prefs,
+        fotos = []
+        if str(prefs.get("os_print_fotos", "1")) == "1" and doc.get("tipo") == "os":
+            fotos = [{"uri": services.image_data_uri(r["thumb"])}
+                     for r in repo.fotos.list_thumbs(self.con, did)]
+        html = renderer(doc, empresa, cliente, veiculo, prefs=prefs, fotos=fotos,
                         gerado_em=datetime.now().strftime("%d/%m/%Y às %H:%M"))
         return doc, html
 
@@ -312,7 +330,11 @@ class Api:
         cliente = repo.clientes.get(self.con, doc["cliente_id"]) if doc.get("cliente_id") else {}
         veiculo = repo.veiculos.get(self.con, doc["veiculo_id"]) if doc.get("veiculo_id") else {}
         empresa = dict(self.con.execute("SELECT * FROM empresa WHERE id=1").fetchone())
-        dados = excel_export.gerar(doc, empresa, cliente, veiculo, repo.get_preferencias(self.con))
+        prefs = repo.get_preferencias(self.con)
+        fotos = []
+        if str(prefs.get("os_print_fotos", "1")) == "1" and doc.get("tipo") == "os":
+            fotos = [bytes(r["thumb"]) for r in repo.fotos.list_thumbs(self.con, did)]
+        dados = excel_export.gerar(doc, empresa, cliente, veiculo, prefs, fotos)
         res = self._win().create_file_dialog(
             webview.SAVE_DIALOG, save_filename=f"{doc['numero']}.xlsx",
             file_types=("Planilha Excel (*.xlsx)", "Todos os arquivos (*.*)"))
@@ -325,6 +347,68 @@ class Api:
         self._audit("exportar", "documento", did, f"{_doc_label(doc)} {doc['numero']} exportado para Excel",
                     {"arquivo": dest})
         return {"arquivo": dest}
+
+    # ----------------------------------------------------------------- fotos da O.S.
+    @_api
+    def list_fotos(self, doc_id):
+        """Galeria do editor: thumbs como data URI + meta."""
+        return [{"id": r["id"], "thumb_uri": services.image_data_uri(r["thumb"]),
+                 "origem": r["origem"], "criado_em": r["criado_em"]}
+                for r in repo.fotos.list_thumbs(self.con, doc_id)]
+
+    @_api
+    def get_foto(self, foto_id):
+        """Imagem cheia (data URI) para o visualizador ampliado."""
+        img, _ = repo.fotos.full(self.con, foto_id)
+        if img is None:
+            raise ValueError("Foto não encontrada.")
+        return {"uri": services.image_data_uri(img)}
+
+    @_api
+    def add_fotos_desktop(self, doc_id):
+        """Adiciona fotos pelo diálogo nativo (multi-seleção)."""
+        self._sessao()
+        res = self._win().create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=True,
+            file_types=("Imagens (*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif)", "Todos os arquivos (*.*)"))
+        if not res:
+            return {"cancelado": True}
+        arquivos = res if isinstance(res, (list, tuple)) else [res]
+        n = 0
+        for p in arquivos:
+            try:
+                fid = repo.fotos.add(self.con, doc_id, Path(p).read_bytes(),
+                                     origem="desktop", usuario_id=(self.usuario or {}).get("id"), stamp=_stamp())
+                self._audit("criar", "foto", fid, "Foto anexada à O.S. (desktop)",
+                            {"documento_id": doc_id, "origem": "desktop"})
+                n += 1
+            except Exception:
+                pass
+        return {"adicionadas": n}
+
+    @_api
+    def delete_foto(self, foto_id):
+        self._sessao()
+        doc_id = repo.fotos.doc_de(self.con, foto_id)
+        if doc_id is not None:  # exclusão bloqueada quando a O.S. está faturada
+            st = self.con.execute("SELECT status FROM documentos WHERE id=?", (doc_id,)).fetchone()
+            if st and st[0] == "Faturada":
+                raise ValueError("A O.S. está faturada; reabra-a para excluir fotos.")
+        repo.fotos.delete(self.con, foto_id)
+        self._audit("excluir", "foto", foto_id, "Foto removida da O.S.", {"documento_id": doc_id})
+        return True
+
+    @_api
+    def foto_sessao(self, doc_id):
+        """Gera o link + QR para anexar fotos a esta O.S. pelo celular na rede local."""
+        self._sessao()
+        if not mobile_server.disponivel():
+            raise ValueError("O acesso por celular não está disponível (servidor não iniciou).")
+        tok = mobile_server.criar_token(doc_id, usuario_id=(self.usuario or {}).get("id"))
+        url = mobile_server.url_para(tok)
+        self._audit("criar", "foto_sessao", doc_id, "Sessão de captura por celular gerada",
+                    {"documento_id": doc_id})
+        return {"url": url, "qr_svg": _qr_svg(url), "expira_horas": mobile_server.TTL // 3600}
 
     # ----------------------------------------------------------------- clientes
     @_api
@@ -588,6 +672,7 @@ class Api:
             return {"cancelado": True}
         dest = res if isinstance(res, str) else res[0]
         self.con.commit()
+        self.con.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # mescla o -wal no .db antes de copiar
         shutil.copy2(str(dbmod.paths.db_path()), dest)
         self._audit("backup", None, None, "Backup do banco gerado", {"arquivo": dest})
         return {"arquivo": dest}
@@ -603,6 +688,11 @@ class Api:
         src = res[0] if isinstance(res, (list, tuple)) else res
         self.con.close()
         shutil.copy2(src, str(dbmod.paths.db_path()))
+        for ext in ("-wal", "-shm"):  # remove resíduos do WAL anterior antes de reabrir
+            try:
+                Path(str(dbmod.paths.db_path()) + ext).unlink()
+            except OSError:
+                pass
         self.con = dbmod.connect(dbmod.paths.db_path())
         # registra no banco recém-restaurado que houve uma restauração (a auditoria anterior veio do backup)
         self._audit("restaurar", None, None, "Banco restaurado a partir de backup", {"origem": str(src)})

@@ -30,6 +30,31 @@ def image_data_uri(blob) -> str:
     return "data:%s;base64,%s" % (mime, base64.b64encode(bytes(blob)).decode("ascii"))
 
 
+def processar_foto(raw, max_full=1600, max_thumb=320, q_full=82, q_thumb=70):
+    """Recebe bytes de uma imagem (qualquer formato) e devolve (jpeg_full, jpeg_thumb).
+    Reorienta pela EXIF (câmera do celular), achata transparência sobre branco e reduz para JPEG."""
+    import io
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(raw))
+    im = ImageOps.exif_transpose(im)  # respeita a orientação registrada pela câmera
+    if im.mode in ("RGBA", "LA", "P"):
+        rgba = im.convert("RGBA")
+        fundo = Image.new("RGB", rgba.size, (255, 255, 255))
+        fundo.paste(rgba, mask=rgba.split()[-1])
+        im = fundo
+    else:
+        im = im.convert("RGB")
+
+    def _jpeg(img, lado, q):
+        out = img.copy()
+        out.thumbnail((lado, lado), Image.LANCZOS)
+        buf = io.BytesIO()
+        out.save(buf, "JPEG", quality=q, optimize=True)
+        return buf.getvalue()
+
+    return _jpeg(im, max_full, q_full), _jpeg(im, max_thumb, q_thumb)
+
+
 def hash_senha(senha, salt=None):
     """Gera (salt_hex, hash_hex) com PBKDF2-HMAC-SHA256 (stdlib, sem dependências).
     Se `salt` vier (hex str), reaproveita-o — útil para conferir uma senha."""

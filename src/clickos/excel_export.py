@@ -50,11 +50,12 @@ def _dt(s) -> str:
     return s
 
 
-def gerar(doc, empresa, cliente, veiculo, prefs=None) -> bytes:
+def gerar(doc, empresa, cliente, veiculo, prefs=None, fotos=None) -> bytes:
     empresa = empresa or {}
     cliente = cliente or {}
     veiculo = veiculo or {}
     prefs = prefs or {}
+    fotos = fotos or []
     wb = Workbook()
     ws = wb.active
     ws.title = "Orcamento" if doc.get("tipo") == "orcamento" else "OrdemServico"
@@ -282,6 +283,28 @@ def gerar(doc, empresa, cliente, veiculo, prefs=None) -> bytes:
         ws.row_dimensions[r].height = 38
         box(r, r)
         row[0] += 1
+
+    # ---- Registro fotográfico (somente O.S. e se o parâmetro estiver ligado) ----
+    if doc.get("tipo") == "os" and str(prefs.get("os_print_fotos", "1")) == "1" and fotos:
+        from openpyxl.drawing.image import Image as XLImage
+        secao("REGISTRO FOTOGRÁFICO")
+        ancoras = ["A", "C", "E"]  # 3 imagens por linha
+        i = 0
+        while i < len(fotos):
+            r = row[0]
+            ws.row_dimensions[r].height = 88
+            for j, col in enumerate(ancoras):
+                if i + j < len(fotos):
+                    try:
+                        im = XLImage(BytesIO(fotos[i + j]))
+                        im.width, im.height = 150, 112
+                        ws.add_image(im, f"{col}{r}")
+                    except Exception:
+                        pass
+            for c in COLS:
+                ws[f"{c}{r}"].border = _BORDER
+            i += 3
+            row[0] += 1
 
     # ---- Termo de garantia (somente O.S. e se o parâmetro estiver ligado) ----
     if doc.get("tipo") == "os" and str(prefs.get("os_print_garantia", "0")) == "1" and empresa.get("termo_garantia"):

@@ -1,7 +1,7 @@
 """Ponto de entrada: inicializa o banco, cria a janela nativa (WebView2) e a API."""
 import webview
 
-from . import db, paths
+from . import db, mobile_server, paths
 from .api import Api
 
 
@@ -28,6 +28,12 @@ def run():
     _suppress_download_flyout()
     con = db.connect(paths.db_path())
     api = Api(con)
+    # servidor HTTP para captura de fotos pelo celular na rede local (conexão própria, daemon thread).
+    # Degrada graciosamente: se não subir, só o "Capturar pelo celular" fica indisponível.
+    try:
+        mobile_server.iniciar(con_factory=lambda: db.connect(paths.db_path()))
+    except Exception:
+        pass
     index = str(paths.asset("web", "index.html"))
     webview.create_window(
         "ClickOS — Ordens de Serviço",

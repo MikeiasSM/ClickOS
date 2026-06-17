@@ -53,6 +53,8 @@
   .termo hr { border: 0; border-top: 1px solid #aaa; margin: 3px 0; }
   .termo a { color: #000; text-decoration: underline; }
   .termo code { font-family: monospace; }
+  .fotos-grid { display: flex; flex-wrap: wrap; gap: 4px; border: 1px solid #000; border-top: 0; padding: 4px; }
+  .foto-img { width: 32%; height: 95px; object-fit: cover; border: 1px solid #999; }
   .mt { margin-top: 5px; }
   h-spacer { display:block; height:5px; }
 </style>
@@ -226,6 +228,12 @@
   {% if doc.parecer_mecanico or doc.mecanico %}
   <div class="sec mt">PARECER TÉCNICO{% if doc.mecanico %} — {{ doc.mecanico }}{% endif %}</div>
   <table class="fields"><tr><td colspan="6" style="min-height:22px">{{ doc.parecer_mecanico or '' }}</td></tr></table>
+  {% endif %}
+
+  {% if doc.tipo == 'os' and prefs.os_print_fotos == '1' and fotos %}
+  <!-- REGISTRO FOTOGRÁFICO (parâmetro os_print_fotos) -->
+  <div class="sec mt">REGISTRO FOTOGRÁFICO</div>
+  <div class="fotos-grid">{% for f in fotos %}<img class="foto-img" src="{{ f.uri }}">{% endfor %}</div>
   {% endif %}
 
   {% if doc.tipo == 'os' and prefs.os_print_garantia == '1' and empresa.termo_garantia %}

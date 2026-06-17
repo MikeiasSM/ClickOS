@@ -10,6 +10,8 @@ python -m PyInstaller --noconfirm --onefile --windowed --name ClickOS `
   --add-data "src/clickos/assets;clickos/assets" `
   --collect-all webview `
   --collect-all openpyxl `
+  --collect-all qrcode `
+  --collect-all PIL `
   run.py
 
 Write-Host "`nPronto: dist\ClickOS.exe"

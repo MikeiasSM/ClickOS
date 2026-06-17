@@ -5,7 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # Ordem fixa das peças da lataria (checklist de entrada)
 LISTA_PECAS = [
@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS documento_lataria (
   peca TEXT NOT NULL, estado TEXT DEFAULT '', ordem INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS documento_fotos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  documento_id INTEGER NOT NULL REFERENCES documentos(id) ON DELETE CASCADE,
+  thumb BLOB NOT NULL, imagem BLOB NOT NULL, mimetype TEXT DEFAULT 'image/jpeg',
+  origem TEXT NOT NULL DEFAULT 'desktop', usuario_id INTEGER, criado_em TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fotos_doc ON documento_fotos(documento_id);
+
 CREATE TABLE IF NOT EXISTS cidades_custom (
   nome TEXT NOT NULL, uf TEXT NOT NULL, UNIQUE(nome, uf)
 );
@@ -170,6 +178,8 @@ def connect(path=None) -> sqlite3.Connection:
     con = sqlite3.connect(str(target), check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA journal_mode = WAL")   # 1 escritor + N leitores concorrentes (bridge + servidor mobile)
+    con.execute("PRAGMA busy_timeout = 5000")  # espera o lock em vez de falhar com 'database is locked'
     _migrate(con)
     return con
 
@@ -224,6 +234,9 @@ def _migrate(con: sqlite3.Connection) -> None:
     if ver < 11:
         _add_column(con, "documentos", "acrescimo_tipo", "TEXT DEFAULT 'valor'")
         con.execute("UPDATE meta SET schema_version = 11")
+    if ver < 12:
+        # documento_fotos + índice já criados por executescript(DDL) acima (IF NOT EXISTS); só registra a versão.
+        con.execute("UPDATE meta SET schema_version = 12")
     if con.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0:
         _seed(con)
     _seed_usuarios(con)

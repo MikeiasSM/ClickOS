@@ -505,3 +505,17 @@ input[readonly]{background:#f8fafc;color:#475569;cursor:not-allowed}
 .dtp-actions button:hover{background:#f1f5f9}
 .dtp-actions .dtp-ok{background:var(--blue);color:#fff;border-color:var(--blue)}
 .dtp-actions .dtp-ok:hover{background:#1d4ed8}
+
+/* fotos da O.S. (galeria, lightbox, modal QR) */
+.foto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px;margin-top:14px}
+.foto-cell{position:relative;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;aspect-ratio:1;background:#f3f4f6}
+.foto-cell img{width:100%;height:100%;object-fit:cover;cursor:zoom-in;display:block}
+.foto-del{position:absolute;top:6px;right:6px;background:rgba(255,255,255,.92);border:1px solid var(--line);
+  border-radius:6px;padding:4px;color:var(--red);cursor:pointer;line-height:0}
+.foto-del:hover{background:#fef2f2}
+.foto-tag{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;border-radius:5px;padding:3px 5px;line-height:0}
+.foto-lightbox{width:auto;max-width:92vw;max-height:90vh;padding:10px}
+.foto-lightbox img{max-width:88vw;max-height:82vh;border-radius:6px;display:block}
+.qr-box{display:flex;justify-content:center;margin:14px 0}
+.qr-box svg{width:230px;height:230px}
+.qr-url{font-family:monospace;font-size:13px;background:#f3f4f6;border-radius:6px;padding:8px;word-break:break-all}

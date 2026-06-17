@@ -173,6 +173,7 @@ PREF_DEFAULTS = {
     "os_exige_km": "0",  # exigir KM de entrada ao abrir a O.S.
     "os_print_checklist": "1",  # incluir o checklist de entrada na impressão da O.S.
     "os_print_garantia": "0",   # exibir o termo de garantia (empresa) na impressão da O.S.
+    "os_print_fotos": "1",      # incluir as fotos da O.S. na impressão e na exportação
 }
 
 
@@ -643,9 +644,52 @@ class _Auditoria:
         return con.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
 
 
+# --------------------------------------------------------------------------- fotos da O.S.
+class _Fotos:
+    """Fotos anexadas a um documento (O.S.). Guarda thumb + imagem reduzida como BLOB."""
+
+    def add(self, con, documento_id, raw_bytes, origem="desktop", usuario_id=None, stamp=None):
+        full, thumb = services.processar_foto(raw_bytes)
+        cur = con.execute(
+            "INSERT INTO documento_fotos(documento_id,thumb,imagem,mimetype,origem,usuario_id,criado_em) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (documento_id, thumb, full, "image/jpeg", origem, usuario_id, _now(stamp)))
+        con.commit()
+        return cur.lastrowid
+
+    def list_meta(self, con, documento_id):
+        """Metadados (sem BLOB) — leve para listar/poll."""
+        return _rows(con.execute(
+            "SELECT id, origem, criado_em FROM documento_fotos WHERE documento_id=? ORDER BY id",
+            (documento_id,)).fetchall())
+
+    def list_thumbs(self, con, documento_id):
+        """id + thumb (BLOB) + meta — para a galeria do editor e o print/Excel."""
+        return _rows(con.execute(
+            "SELECT id, thumb, origem, criado_em FROM documento_fotos WHERE documento_id=? ORDER BY id",
+            (documento_id,)).fetchall())
+
+    def thumb(self, con, foto_id):
+        r = con.execute("SELECT thumb FROM documento_fotos WHERE id=?", (foto_id,)).fetchone()
+        return r["thumb"] if r else None
+
+    def full(self, con, foto_id):
+        r = con.execute("SELECT imagem, mimetype FROM documento_fotos WHERE id=?", (foto_id,)).fetchone()
+        return (r["imagem"], r["mimetype"]) if r else (None, None)
+
+    def doc_de(self, con, foto_id):
+        r = con.execute("SELECT documento_id FROM documento_fotos WHERE id=?", (foto_id,)).fetchone()
+        return r["documento_id"] if r else None
+
+    def delete(self, con, foto_id):
+        con.execute("DELETE FROM documento_fotos WHERE id=?", (foto_id,))
+        con.commit()
+
+
 clientes = _Clientes()
 veiculos = _Veiculos()
 itens = _Itens()
 documentos = _Documentos()
 usuarios = _Usuarios()
 auditoria = _Auditoria()
+fotos = _Fotos()
