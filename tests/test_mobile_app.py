@@ -180,6 +180,35 @@ def test_status_respeita_fluxo(srv):
     assert req("POST", f"/api/os/{oid}/status", {"status": "Em Execução"})[0] == 200  # avanço válido
 
 
+def test_faturar_com_pagamento(srv):
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "SUPORTE", "senha": "1234567890"})
+    oid = srv["os_id"]
+    req("POST", f"/api/os/{oid}/status", {"status": "Em Execução"})
+    req("POST", f"/api/os/{oid}/status", {"status": "Concluída"})
+    assert req("POST", f"/api/os/{oid}/faturar", {})[0] == 400  # sem forma de pagamento
+    st, _ = req("POST", f"/api/os/{oid}/faturar",
+                {"forma_pagamento": "PIX", "valor_pago": "200", "parcelas": "1", "obs_pagamento": "à vista"})
+    assert st == 200
+    st, d = req("GET", f"/api/os/{oid}")
+    assert d["status"] == "Faturada"
+    assert d["pagamento"]["forma"] == "PIX" and d["pagamento"]["valor_pago"] == 200
+    # depois de faturada não há mais transições (trava)
+    assert d["proximos_status"] == []
+
+
+def test_mecanico_nao_fatura_pelo_endpoint(srv):
+    con = srv["con"]
+    cli = con.execute("SELECT cliente_id FROM documentos WHERE id=?", (srv["os_id"],)).fetchone()[0]
+    osd = repo.documentos.create(con, {"tipo": "os", "data_abertura": "2026-06-17", "cliente_id": cli,
+                                       "km_entrada": "1", "itens": [{"descricao": "S", "quantidade": 1, "valor_unitario": 50}]})
+    repo.documentos.set_status(con, osd["id"], "Em Execução")
+    repo.documentos.set_status(con, osd["id"], "Concluída")
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "MEC", "senha": "1234"})
+    assert req("POST", f"/api/os/{osd['id']}/faturar", {"forma_pagamento": "PIX"})[0] == 403
+
+
 def test_reset_senha_derruba_sessao_mobile(srv):
     con = srv["con"]
     req = _cliente(srv["porta"])

@@ -120,6 +120,7 @@ async function viewDetalhe(id) {
       <div class="kv"><span class="k">Responsável</span><span class="v">${esc(d.responsavel || "—")}</span></div>
     </div>
     ${itens ? `<div class="sec-t">Serviços e produtos</div><div class="card">${itens}<div class="tot"><span>Total</span><span>${brl(d.total)}</span></div></div>` : ""}
+    ${pagHtml(d)}
     <div class="sec-t">Fotos</div>
     <button class="btn sec" id="foto">${IC.camera}<span>Tirar foto</span></button>
     <div class="fotos" id="fotos" style="margin-top:10px"></div>
@@ -127,7 +128,8 @@ async function viewDetalhe(id) {
   </div>`;
   bindTop();
   $("#foto").onclick = () => tirarFoto(id, carregarFotos);
-  app.querySelectorAll("[data-st]").forEach(b => b.onclick = () => mudarStatus(id, b.dataset.st));
+  app.querySelectorAll("[data-st]").forEach(b => b.onclick = () =>
+    b.dataset.st === "Faturada" ? abrirFaturamento(id, d.total) : mudarStatus(id, b.dataset.st));
   async function carregarFotos() {
     try {
       const fs = await api("GET", "/api/os/" + id + "/fotos");
@@ -145,6 +147,54 @@ async function mudarStatus(id, status) {
   toast("Atualizando…");
   try { await api("POST", "/api/os/" + id + "/status", { status }); toast("Status atualizado ✓", "ok"); viewDetalhe(id); }
   catch (e) { if (e.status === 401) { ME = null; return viewLogin(); } toast(e.message || "Não foi possível atualizar", "err"); }
+}
+function pagHtml(d) {
+  const p = d.pagamento || {};
+  if (d.status !== "Faturada" || !p.forma) return "";
+  const troco = (p.valor_pago != null) ? Math.max(0, (p.valor_pago || 0) - (d.total || 0)) : null;
+  return `<div class="sec-t">Pagamento</div><div class="card">
+    <div class="kv"><span class="k">Forma</span><span class="v">${esc(p.forma)}</span></div>
+    ${p.parcelas ? `<div class="kv"><span class="k">Parcelas</span><span class="v">${p.parcelas}x</span></div>` : ""}
+    ${p.valor_pago != null ? `<div class="kv"><span class="k">Valor pago</span><span class="v">${brl(p.valor_pago)}</span></div>
+      <div class="kv"><span class="k">Troco</span><span class="v">${brl(troco)}</span></div>` : ""}
+    ${p.obs ? `<div class="kv"><span class="k">Observação</span><span class="v">${esc(p.obs)}</span></div>` : ""}</div>`;
+}
+function abrirFaturamento(id, total) {
+  const formas = (ME && ME.formas_pagamento) || [];
+  const sheet = document.createElement("div");
+  sheet.className = "sheet-bg";
+  sheet.innerHTML = `<div class="sheet"><div class="sheet-h"><b>Faturar O.S.</b><button class="ib" id="fx">✕</button></div>
+    <div class="sheet-b">
+      <div class="muted small" style="margin-bottom:10px">Total da O.S.: <b style="color:var(--ink)">${brl(total)}</b></div>
+      <label class="fl">Forma de pagamento *</label>
+      <select id="f_forma" class="inp"><option value="">Selecione…</option>${formas.map(f => `<option>${esc(f)}</option>`).join("")}</select>
+      <label class="fl">Valor pago</label>
+      <input id="f_pago" class="inp" inputmode="decimal" placeholder="0,00">
+      <div class="muted small" id="f_troco" style="min-height:16px"></div>
+      <label class="fl">Parcelas</label>
+      <input id="f_parc" class="inp" inputmode="numeric" placeholder="1">
+      <label class="fl">Observação do pagamento</label>
+      <textarea id="f_obs" class="inp" rows="2" placeholder="Ex.: 50% de entrada, 50% na entrega"></textarea>
+      <button class="btn" id="f_ok" style="margin-top:16px">Confirmar faturamento</button>
+    </div></div>`;
+  document.body.appendChild(sheet);
+  const fechar = () => sheet.remove();
+  sheet.querySelector("#fx").onclick = fechar;
+  sheet.addEventListener("click", e => { if (e.target === sheet) fechar(); });
+  const pago = sheet.querySelector("#f_pago"), troco = sheet.querySelector("#f_troco");
+  pago.addEventListener("input", () => {
+    const v = parseFloat((pago.value || "").replace(",", ".")) || 0;
+    troco.textContent = v > 0 ? "Troco: " + brl(Math.max(0, v - (total || 0))) : "";
+  });
+  sheet.querySelector("#f_ok").onclick = async () => {
+    const forma = sheet.querySelector("#f_forma").value;
+    if (!forma) { toast("Selecione a forma de pagamento", "err"); return; }
+    const payload = { forma_pagamento: forma, valor_pago: pago.value,
+      parcelas: sheet.querySelector("#f_parc").value, obs_pagamento: sheet.querySelector("#f_obs").value };
+    toast("Faturando…");
+    try { await api("POST", "/api/os/" + id + "/faturar", payload); toast("O.S. faturada ✓", "ok"); fechar(); viewDetalhe(id); }
+    catch (e) { if (e.status === 401) { ME = null; return viewLogin(); } toast(e.message || "Não foi possível faturar", "err"); }
+  };
 }
 function lightbox(fid) {
   const lb = document.createElement("div"); lb.className = "lb";

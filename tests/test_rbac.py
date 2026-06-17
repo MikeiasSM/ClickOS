@@ -10,7 +10,7 @@ def _con(tmp_path, nome="rbac.db"):
 
 def test_schema_v13_e_papeis_padrao(tmp_path):
     con = _con(tmp_path)
-    assert con.execute("SELECT schema_version FROM meta").fetchone()[0] == 13
+    assert con.execute("SELECT schema_version FROM meta").fetchone()[0] == db.SCHEMA_VERSION
     nomes = {r["nome"] for r in repo.papeis.list(con)}
     assert {"Administrador", "Atendente", "Mecânico"} <= nomes
     # SUPORTE recebe papel no seed (mesmo ignorando RBAC) e a coluna existe
@@ -26,7 +26,7 @@ def test_migracao_de_v12_da_admin_aos_existentes(tmp_path):
     con.commit()
     con.close()
     con2 = db.connect(tmp_path / "antigo.db")  # reabrir dispara migração + seed
-    assert con2.execute("SELECT schema_version FROM meta").fetchone()[0] == 13
+    assert con2.execute("SELECT schema_version FROM meta").fetchone()[0] == db.SCHEMA_VERSION
     admin = con2.execute("SELECT id FROM papeis WHERE nome='Administrador'").fetchone()[0]
     todos = con2.execute("SELECT papel_id FROM usuarios").fetchall()
     assert all(u["papel_id"] == admin for u in todos)

@@ -367,6 +367,36 @@ class _Documentos:
             con.execute("UPDATE documentos SET faturado_em=NULL WHERE id=?", (did,))
         con.commit()
 
+    def faturar(self, con, did, pagamento=None, stamp=None):
+        """Registra os dados de pagamento e fatura a O.S. (status -> Faturada).
+        Valida itens e forma de pagamento ANTES de gravar (evita escrita parcial)."""
+        p = pagamento or {}
+        if not con.execute("SELECT COUNT(*) FROM documento_itens WHERE documento_id=?", (did,)).fetchone()[0]:
+            raise ValueError("Não é possível faturar uma O.S. sem nenhum serviço.")
+        if not (p.get("forma_pagamento") or "").strip():
+            raise ValueError("Informe a forma de pagamento.")
+
+        def _num(x):
+            s = str(x if x is not None else "").strip()
+            if not s:
+                return None
+            try:
+                return float(s.replace(",", "."))
+            except ValueError:
+                return None
+
+        parcelas = str(p.get("parcelas") or "").strip()
+        campos = {"forma_pagamento": p.get("forma_pagamento").strip(),
+                  "valor_pago": _num(p.get("valor_pago")),
+                  "parcelas": int(parcelas) if parcelas.isdigit() and int(parcelas) > 0 else None,
+                  "obs_pagamento": (p.get("obs_pagamento") or "").strip() or None}
+        if "ordem_compra" in p:  # exigido em algumas oficinas (preferência os_exige_oc)
+            campos["ordem_compra"] = (p.get("ordem_compra") or "").strip() or None
+        sets = ",".join(f"{c}=?" for c in campos)
+        con.execute(f"UPDATE documentos SET {sets} WHERE id=?", list(campos.values()) + [did])
+        self.set_status(con, did, "Faturada", stamp=stamp)  # checa OC/itens, carimba faturado_em e faz commit
+        return self.get(con, did)
+
     def get(self, con, did):
         d = _row(con.execute(
             "SELECT d.*, c.nome AS cliente_nome, v.placa AS veiculo_placa, "

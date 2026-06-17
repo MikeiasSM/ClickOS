@@ -184,7 +184,10 @@ def _os_detalhe(d, fotos, sess):
             "itens": [{"descricao": i.get("descricao"), "quantidade": i.get("quantidade"),
                        "valor_liquido": i.get("valor_liquido")} for i in d.get("itens", [])],
             "fotos": [{"id": f["id"]} for f in fotos],
-            "proximos_status": prox}
+            "proximos_status": prox, "pode_faturar": pode_fat,
+            "pagamento": {"forma": d.get("forma_pagamento"), "valor_pago": d.get("valor_pago"),
+                          "parcelas": d.get("parcelas"), "obs": d.get("obs_pagamento"),
+                          "faturado_em": d.get("faturado_em")}}
 
 
 # ---- página de captura de fotos por token (sem login) ----
@@ -349,7 +352,8 @@ class _Handler(BaseHTTPRequestHandler):
             if s is None:
                 return self._json({"erro": "Sessão expirada."}, 401)
             mods = list(db.MODULO_KEYS) if s["is_suporte"] else sorted(s["modulos"])
-            return self._json({"login": s["login"], "is_suporte": s["is_suporte"], "modulos": mods})
+            return self._json({"login": s["login"], "is_suporte": s["is_suporte"], "modulos": mods,
+                               "formas_pagamento": db.FORMAS_PAGAMENTO})
         if rota == ["os"]:
             s = self._exige("os")
             if s is None:
@@ -431,7 +435,8 @@ class _Handler(BaseHTTPRequestHandler):
             cookie = f"sid={sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSAO_TTL}"
             mods = list(db.MODULO_KEYS) if user["is_suporte"] else modulos
             return self._json({"login": user["login"], "nome": user.get("nome"),
-                               "modulos": mods, "is_suporte": user["is_suporte"]},
+                               "modulos": mods, "is_suporte": user["is_suporte"],
+                               "formas_pagamento": db.FORMAS_PAGAMENTO},
                               extra=[("Set-Cookie", cookie)])
         if rota == ["logout"]:
             sid = self._cookie_sid()
@@ -461,6 +466,29 @@ class _Handler(BaseHTTPRequestHandler):
                     try:
                         audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "status", "documento", oid,
                                         f"O.S.: {antes['status']} → {novo} (celular)", {"de": antes["status"], "para": novo})
+                    except Exception:
+                        pass
+            except ValueError as ve:
+                return self._json({"erro": str(ve)}, 400)
+            return self._json({"ok": True})
+        if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] == "faturar":
+            s = self._exige("faturar")
+            if s is None:
+                return
+            body = self._corpo_json(limite=64 * 1024) or {}
+            oid = int(rota[1])
+            try:
+                with _DB_LOCK:
+                    d = self.con.execute("SELECT status FROM documentos WHERE id=? AND tipo='os'", (oid,)).fetchone()
+                    if d is None:
+                        return self._json({"erro": "O.S. não encontrada."}, 404)
+                    if "Faturada" not in _FLUXO.get(d["status"], []):
+                        return self._json({"erro": "A O.S. precisa estar Concluída para faturar."}, 400)
+                    repo.documentos.faturar(self.con, oid, body)
+                    try:
+                        audit.registrar(self.con, {"id": s["uid"], "login": s["login"]}, "status", "documento", oid,
+                                        f"O.S. faturada pelo celular ({body.get('forma_pagamento', '')})",
+                                        {"de": d["status"], "para": "Faturada", "forma_pagamento": body.get("forma_pagamento")})
                     except Exception:
                         pass
             except ValueError as ve:
@@ -555,6 +583,14 @@ def _esc(s):
     return (str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+class _Servidor(ThreadingHTTPServer):
+    # allow_reuse_address=False: NÃO permite duplo-bind na mesma porta (no Windows o SO_REUSEADDR
+    # deixaria duas instâncias do ClickOS escutarem a 8732 e embaralharem as requisições). Assim, uma
+    # 2ª instância simplesmente cai na próxima porta da lista.
+    allow_reuse_address = False
+    daemon_threads = True
+
+
 # ---- bootstrap ----
 def iniciar(con_factory, host="0.0.0.0"):
     """Sobe o servidor numa daemon thread. Retorna (porta, ip) ou (None, None) se falhar."""
@@ -565,7 +601,7 @@ def iniciar(con_factory, host="0.0.0.0"):
     httpd = None
     for p in PORTAS:
         try:
-            httpd = ThreadingHTTPServer((host, p), _Handler)
+            httpd = _Servidor((host, p), _Handler)
             break
         except OSError:
             continue

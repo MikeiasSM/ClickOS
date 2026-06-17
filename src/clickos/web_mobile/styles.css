@@ -84,6 +84,21 @@ button{font-family:inherit;cursor:pointer}
 .lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .lb img{max-width:100%;max-height:90vh;border-radius:8px}
 
+/* sheet (faturamento, formulários) */
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg2);width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:18px 18px 0 0;
+  border:1px solid var(--line);border-bottom:0;animation:up .2s ease-out}
+@keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.sheet-h{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line);
+  position:sticky;top:0;background:var(--bg2)}
+.sheet-h b{font-size:16px}
+.sheet-b{padding:16px 18px calc(20px + env(safe-area-inset-bottom))}
+.fl{display:block;font-size:13px;color:var(--muted);margin:12px 0 6px}
+.inp{width:100%;padding:13px;border:1px solid var(--line);border-radius:11px;background:#0b1322;color:var(--ink);font-size:16px}
+.inp:focus{outline:none;border-color:var(--blue)}
+select.inp{appearance:none;-webkit-appearance:none}
+textarea.inp{resize:vertical}
+
 /* toast */
 #toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translateX(-50%);
   z-index:60;display:flex;flex-direction:column;gap:8px;pointer-events:none;width:90%;max-width:420px}
