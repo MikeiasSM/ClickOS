@@ -5,6 +5,16 @@ const app = document.getElementById("app");
 const $ = (s, r) => (r || document).querySelector(s);
 let ME = null;
 
+/* tema (claro/escuro) — lembrado por aparelho */
+(function () { try { document.documentElement.dataset.theme = localStorage.getItem("clickos_theme") || "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; } })();
+function alternarTema() {
+  const novo = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = novo;
+  try { localStorage.setItem("clickos_theme", novo); } catch (e) {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = novo === "light" ? "#2563eb" : "#0f172a";
+}
+
 const IC = {
   wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.1 2.1-2.7-.6-.6-2.7z"/></svg>',
   search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>',
@@ -12,6 +22,7 @@ const IC = {
   back: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   logout: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
   camera: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+  tema: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>',
 };
 const ST = { "Aberta": ["b-aberta", "Aberta"], "Em Execução": ["b-exec", "Em Execução"], "Concluída": ["b-concl", "Concluída"], "Faturada": ["b-fat", "Faturada"], "Cancelada": ["b-canc", "Cancelada"] };
 
@@ -31,13 +42,15 @@ async function api(method, path, body) {
 }
 
 function topo(title, home) {
+  const tema = `<button class="ib" id="tema" aria-label="Alternar tema">${IC.tema}</button>`;
   return `<div class="top">${home
-    ? `<h1>${esc(title)}</h1><button class="ib" id="logout" aria-label="Sair">${IC.logout}</button>`
-    : `<button class="ib" id="back" aria-label="Voltar">${IC.back}</button><h1>${esc(title)}</h1>`}</div>`;
+    ? `<h1>${esc(title)}</h1>${tema}<button class="ib" id="logout" aria-label="Sair">${IC.logout}</button>`
+    : `<button class="ib" id="back" aria-label="Voltar">${IC.back}</button><h1>${esc(title)}</h1>${tema}`}</div>`;
 }
 function bindTop() {
   const lo = $("#logout"); if (lo) lo.onclick = async () => { try { await api("POST", "/api/logout"); } catch (e) {} ME = null; viewLogin(); };
   const bk = $("#back"); if (bk) bk.onclick = () => viewLista();
+  const tm = $("#tema"); if (tm) tm.onclick = alternarTema;
 }
 
 /* ----------------------------------------------------------------- login */

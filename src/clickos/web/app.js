@@ -47,6 +47,7 @@ const ICONS = {
   tag: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
   lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   key: '<path d="M21 2l-2 2"/><path d="M14.5 6.5 18 10"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m11.5 11.5 8-8 2 2"/>',
   palette: '<circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996C18.49 15.39 22 11.9 22 7.5 22 4.42 17.5 2 12 2z"/>',
@@ -2116,6 +2117,12 @@ function mountUserChip() {
   const ava = document.getElementById("user-ava");
   if (ava) { if (CURRENT_USER && CURRENT_USER.avatar_uri) ava.innerHTML = `<img src="${CURRENT_USER.avatar_uri}">`; else { ava.innerHTML = ic("user", 18); } }
   document.getElementById("btn-logout").onclick = logout;
+  const bt = document.getElementById("btn-tema"); if (bt) bt.onclick = alternarTema;
+}
+function alternarTema() {
+  const novo = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = novo;
+  try { localStorage.setItem("clickos_theme", novo); } catch (e) {}
 }
 async function logout() {
   if (!await confirma("Deseja sair do app agora?", { ok: "Sair" })) return;
