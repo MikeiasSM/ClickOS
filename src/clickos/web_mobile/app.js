@@ -23,6 +23,7 @@ const IC = {
   logout: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>',
   camera: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
   tema: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>',
+  share: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>',
 };
 const ST = { "Aberta": ["b-aberta", "Aberta"], "Em Execução": ["b-exec", "Em Execução"], "Concluída": ["b-concl", "Concluída"], "Faturada": ["b-fat", "Faturada"], "Cancelada": ["b-canc", "Cancelada"] };
 
@@ -140,10 +141,17 @@ async function viewDetalhe(id) {
     <div class="sec-t">Fotos</div>
     <button class="btn sec" id="foto">${IC.camera}<span>Tirar foto</span></button>
     <div class="fotos" id="fotos" style="margin-top:10px"></div>
+    <div class="sec-t">Compartilhar no WhatsApp</div>
+    <div class="row" style="gap:10px">
+      <button class="btn ghost grow" id="sh-pdf">${IC.share}<span>PDF</span></button>
+      <button class="btn ghost grow" id="sh-xls">${IC.share}<span>Excel</span></button>
+    </div>
     ${acts ? `<div class="acts">${acts}</div>` : ""}
   </div>`;
   bindTop();
   $("#foto").onclick = () => tirarFoto(id, carregarFotos);
+  $("#sh-pdf").onclick = () => compartilhar(id, d.numero, "pdf");
+  $("#sh-xls").onclick = () => compartilhar(id, d.numero, "excel");
   const ed = $("#editar"); if (ed) ed.onclick = () => viewFormOS(id);
   app.querySelectorAll("[data-st]").forEach(b => b.onclick = () =>
     b.dataset.st === "Faturada" ? abrirFaturamento(id, d.total) : mudarStatus(id, b.dataset.st));
@@ -212,6 +220,25 @@ function abrirFaturamento(id, total) {
     try { await api("POST", "/api/os/" + id + "/faturar", payload); toast("O.S. faturada ✓", "ok"); fechar(); viewDetalhe(id); }
     catch (e) { if (e.status === 401) { ME = null; return viewLogin(); } toast(e.message || "Não foi possível faturar", "err"); }
   };
+}
+async function compartilhar(id, numero, formato) {
+  const ext = formato === "pdf" ? "pdf" : "xlsx";
+  const mime = formato === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  toast(formato === "pdf" ? "Gerando PDF…" : "Gerando Excel…");
+  try {
+    const r = await fetch("/api/os/" + id + "/" + formato, { credentials: "same-origin" });
+    if (!r.ok) { let e = {}; try { e = await r.json(); } catch (x) {} if (r.status === 401) { ME = null; return viewLogin(); } toast((e && e.erro) || "Não foi possível gerar o arquivo.", "err"); return; }
+    const blob = await r.blob();
+    const nome = (numero || "OS") + "." + ext;
+    const file = new File([blob], nome, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: numero || "Ordem de Serviço", text: "Ordem de Serviço " + (numero || "") });
+    } else {  // navegador sem compartilhamento de arquivo: baixa o arquivo
+      const url = URL.createObjectURL(blob); const a = document.createElement("a");
+      a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      toast("Arquivo baixado.", "ok");
+    }
+  } catch (e) { if (e && e.name === "AbortError") return; toast("Não foi possível compartilhar.", "err"); }
 }
 function lightbox(fid) {
   const lb = document.createElement("div"); lb.className = "lb";

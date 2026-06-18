@@ -1,6 +1,10 @@
 """API exposta ao JavaScript (ponte pywebview). Cada método retorna {ok, data|erro}."""
 import functools
 import shutil
+import subprocess
+import tempfile
+import urllib.parse
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +16,7 @@ from . import excel_export
 from . import mobile_server
 from . import paths
 from . import printing
+from . import render
 from . import repositories as repo
 from . import services
 
@@ -434,6 +439,45 @@ class Api:
         if img is None:
             raise ValueError("Foto não encontrada.")
         return {"uri": services.image_data_uri(img)}
+
+    @_api
+    def compartilhar_whatsapp(self, payload):
+        """Gera o PDF (fiel, via WebView2) ou o Excel, salva em Downloads e abre o WhatsApp Web
+        com uma mensagem pronta + revela o arquivo no Explorer (o usuário anexa na conversa)."""
+        self._sessao()
+        did = (payload or {}).get("id")
+        formato = (payload or {}).get("formato") or "pdf"
+        doc = repo.documentos.get(self.con, did)
+        if not doc:
+            raise ValueError("Documento não encontrado.")
+        numero = doc["numero"]
+        downloads = Path.home() / "Downloads"
+        try:
+            downloads.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            downloads = Path(tempfile.gettempdir())
+        if formato == "excel":
+            _doc, dados = render.documento_excel(self.con, did)
+            dest = downloads / f"{numero}.xlsx"
+        else:
+            from . import pdfgen
+            if not pdfgen.disponivel():
+                raise ValueError("Geração de PDF indisponível.")
+            _doc, html = render.documento_html(self.con, did)
+            dados = pdfgen.gerar_pdf(html)
+            dest = downloads / f"{numero}.pdf"
+        dest.write_bytes(dados)
+        try:
+            webbrowser.open("https://wa.me/?text=" + urllib.parse.quote(f"Olá! Segue o documento {numero}."))
+        except Exception:
+            pass
+        try:
+            subprocess.Popen(["explorer", "/select,", str(dest)])  # revela o arquivo no Explorer
+        except Exception:
+            pass
+        self._audit("exportar", "documento", did,
+                    f"{_doc_label(doc)} {numero} preparado para WhatsApp ({formato})", {"arquivo": str(dest)})
+        return {"arquivo": str(dest), "formato": formato}
 
     @_api
     def add_fotos_desktop(self, doc_id):

@@ -48,6 +48,7 @@ const ICONS = {
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/>',
   lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   key: '<path d="M21 2l-2 2"/><path d="M14.5 6.5 18 10"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m11.5 11.5 8-8 2 2"/>',
   palette: '<circle cx="13.5" cy="6.5" r=".6" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".6" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".6" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".6" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996C18.49 15.39 22 11.9 22 7.5 22 4.42 17.5 2 12 2z"/>',
@@ -1175,11 +1176,31 @@ async function printPreview(id) {
   const m = h(`<div class="modal" style="width:880px"><button class="close">×</button><h3>${esc(r.numero)}</h3>
     <iframe style="width:100%;height:64vh;border:1px solid #e5e7eb;border-radius:8px"></iframe>
     <div class="between mt"><button class="btn" id="fechar">Fechar</button>
-      <div class="row"><button class="btn" id="xls">${ic("sheet", 16)}<span>Exportar Excel</span></button><button class="btn btn-primary" id="imp">${ic("printer", 16)}<span>Imprimir / Salvar PDF</span></button></div></div></div>`);
+      <div class="row"><button class="btn" id="wpp">${ic("share", 16)}<span>WhatsApp</span></button><button class="btn" id="xls">${ic("sheet", 16)}<span>Exportar Excel</span></button><button class="btn btn-primary" id="imp">${ic("printer", 16)}<span>Imprimir / Salvar PDF</span></button></div></div></div>`);
   const bg = openModal(m); m.querySelector("iframe").srcdoc = r.html;
   m.querySelector(".close").onclick = () => bg.remove(); m.querySelector("#fechar").onclick = () => bg.remove();
   m.querySelector("#imp").onclick = () => { const fr = m.querySelector("iframe"); fr.contentWindow.focus(); fr.contentWindow.print(); };
   m.querySelector("#xls").onclick = () => exportarExcel(id);
+  m.querySelector("#wpp").onclick = () => compartilharWpp(id);
+}
+async function compartilharWpp(id) {
+  const fmt = await escolha("Compartilhar no WhatsApp", "Como deseja enviar o documento?", [["pdf", "PDF"], ["excel", "Excel"]]);
+  if (!fmt) return;
+  toast("Preparando " + fmt.toUpperCase() + "…");
+  try {
+    const r = await api("compartilhar_whatsapp", { id, formato: fmt });
+    if (r && r.arquivo) toast("Arquivo salvo em Downloads — anexe-o na conversa do WhatsApp.", "ok");
+  } catch (e) {}
+}
+function escolha(titulo, msg, opcoes) {
+  return new Promise(res => {
+    const botoes = opcoes.map(([v, l]) => `<button class="btn btn-primary" data-v="${v}">${esc(l)}</button>`).join("");
+    const m = h(`<div class="modal" style="width:420px"><h3>${esc(titulo)}</h3><p class="muted" style="margin:0 0 18px">${esc(msg)}</p>
+      <div class="row" style="justify-content:flex-end;gap:8px"><button class="btn" data-v="">Cancelar</button>${botoes}</div></div>`);
+    const bg = h(`<div class="modal-bg"></div>`); bg.appendChild(m); document.getElementById("modal-root").appendChild(bg); injectIcons(m);
+    bg.addEventListener("mousedown", e => { if (e.target === bg) { bg.remove(); res(null); } });
+    m.querySelectorAll("[data-v]").forEach(b => b.onclick = () => { bg.remove(); res(b.dataset.v || null); });
+  });
 }
 async function exportarExcel(id) {
   const r = await api("export_excel", id);

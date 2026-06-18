@@ -223,6 +223,9 @@
       <td class="lbl" style="width:12%">Validade</td><td>{{ doc.validade or '' }}</td>
     </tr>
     {% if doc.observacoes %}<tr><td class="lbl">Observações</td><td colspan="5">{{ doc.observacoes }}</td></tr>{% endif %}
+    {% if doc.tipo == 'os' and doc.status == 'Faturada' and (doc.parcelas or doc.valor_pago is not none or doc.obs_pagamento) %}
+    <tr><td class="lbl">Pagamento</td><td colspan="5">{{ doc.forma_pagamento or '' }}{% if doc.parcelas %} — {{ doc.parcelas }}x{% endif %}{% if doc.valor_pago is not none %} — Pago: {{ doc.valor_pago|brl }}{% set _troco = doc.valor_pago - (doc.total or 0) %}{% if _troco > 0 %} — Troco: {{ _troco|brl }}{% endif %}{% endif %}{% if doc.obs_pagamento %} — {{ doc.obs_pagamento }}{% endif %}</td></tr>
+    {% endif %}
   </table>
 
   {% if doc.parecer_mecanico or doc.mecanico %}

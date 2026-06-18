@@ -270,6 +270,21 @@ def gerar(doc, empresa, cliente, veiculo, prefs=None, fotos=None) -> bytes:
         r = row[0] - 1
         ws[f"C{r}"].value = doc.get("observacoes")
         ws.row_dimensions[r].height = 36
+    if doc.get("tipo") == "os" and doc.get("status") == "Faturada" and (
+            doc.get("parcelas") or doc.get("valor_pago") is not None or doc.get("obs_pagamento")):
+        partes = []
+        if doc.get("forma_pagamento"):
+            partes.append(str(doc.get("forma_pagamento")))
+        if doc.get("parcelas"):
+            partes.append(f"{doc.get('parcelas')}x")
+        if doc.get("valor_pago") is not None:
+            partes.append("Pago: " + _brl(doc.get("valor_pago")))
+            troco = (doc.get("valor_pago") or 0) - (doc.get("total") or 0)
+            if troco > 0:
+                partes.append("Troco: " + _brl(troco))
+        if doc.get("obs_pagamento"):
+            partes.append(str(doc.get("obs_pagamento")))
+        campo("Pagamento", " — ".join(partes), full=True)
 
     # ---- Parecer técnico (O.S.) ----
     if doc.get("parecer_mecanico") or doc.get("mecanico"):

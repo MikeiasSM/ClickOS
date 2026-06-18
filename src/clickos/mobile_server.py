@@ -20,6 +20,8 @@ from urllib.parse import parse_qs, urlparse
 from . import audit
 from . import db
 from . import paths
+from . import pdfgen
+from . import render
 from . import repositories as repo
 from . import services
 
@@ -283,11 +285,11 @@ class _Handler(BaseHTTPRequestHandler):
         return [p for p in path.split("/") if p != ""]
 
     def _corpo_json(self, limite=25 * 1024 * 1024):
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        if length <= 0 or length > limite:
+        raw = getattr(self, "_raw", b"")
+        if not raw or len(raw) > limite:
             return None
         try:
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            return json.loads(raw.decode("utf-8"))
         except Exception:
             return None
 
@@ -341,6 +343,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             ps = self._partes()
+            # consome o corpo SEMPRE (antes de qualquer resposta) — no Windows, responder um erro
+            # sem ler o corpo enviado fecha a conexão com RST e o cliente recebe ConnectionAborted.
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            self._raw = self.rfile.read(length) if 0 < length <= 30 * 1024 * 1024 else b""
             if ps[:1] == ["api"]:
                 return self._api_post(ps[1:])
             if len(ps) >= 3 and ps[0] == "m" and ps[2] == "foto":
@@ -429,6 +435,31 @@ class _Handler(BaseHTTPRequestHandler):
             with _DB_LOCK:
                 rows = repo.itens.search(self.con, q) if q else repo.itens.list(self.con)
             return self._json([{"id": r["id"], "nome": r.get("nome"), "preco": r.get("preco"), "tipo": r.get("tipo")} for r in rows[:50]])
+        if len(rota) == 3 and rota[0] == "os" and rota[1].isdigit() and rota[2] in ("pdf", "excel"):
+            s = self._exige("os")
+            if s is None:
+                return
+            oid = int(rota[1])
+            with _DB_LOCK:
+                row = self.con.execute("SELECT numero FROM documentos WHERE id=? AND tipo='os'", (oid,)).fetchone()
+            if not row:
+                return self._json({"erro": "O.S. não encontrada."}, 404)
+            numero = row["numero"]
+            if rota[2] == "excel":
+                with _DB_LOCK:
+                    _doc, dados = render.documento_excel(self.con, oid)
+                return self._send(200, dados, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                  extra=[("Content-Disposition", f'attachment; filename="{numero}.xlsx"')])
+            if not pdfgen.disponivel():
+                return self._json({"erro": "Geração de PDF indisponível no momento."}, 503)
+            with _DB_LOCK:
+                _doc, html = render.documento_html(self.con, oid)
+            try:
+                dados = pdfgen.gerar_pdf(html)  # cria a janela WebView2 FORA do _DB_LOCK (~3s)
+            except Exception:
+                return self._json({"erro": "Não foi possível gerar o PDF."}, 500)
+            return self._send(200, dados, "application/pdf",
+                              extra=[("Content-Disposition", f'attachment; filename="{numero}.pdf"')])
         return self._json({"erro": "nao encontrado"}, 404)
 
     def _api_post(self, rota):

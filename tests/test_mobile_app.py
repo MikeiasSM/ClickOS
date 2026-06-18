@@ -245,6 +245,17 @@ def test_criar_os_exige_modulo_os(srv):
     assert req("POST", "/api/os", {"cliente_id": 1, "itens": []})[0] == 403
 
 
+def test_excel_endpoint_e_pdf_indisponivel(srv):
+    from clickos import render
+    req = _cliente(srv["porta"])
+    req("POST", "/api/login", {"login": "SUPORTE", "senha": "1234567890"})
+    assert req("GET", f"/api/os/{srv['os_id']}/excel")[0] == 200      # Excel gerado no servidor
+    assert req("GET", f"/api/os/{srv['os_id']}/pdf")[0] == 503        # PDF exige WebView2 (ausente nos testes)
+    # o Excel é um arquivo .xlsx válido (zip começa com 'PK')
+    _doc, dados = render.documento_excel(srv["con"], srv["os_id"])
+    assert dados[:2] == b"PK"
+
+
 def test_reset_senha_derruba_sessao_mobile(srv):
     con = srv["con"]
     req = _cliente(srv["porta"])
